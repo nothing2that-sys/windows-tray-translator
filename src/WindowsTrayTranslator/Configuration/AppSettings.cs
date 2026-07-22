@@ -1,0 +1,41 @@
+namespace WindowsTrayTranslator.Configuration;
+
+public sealed class AppSettings
+{
+    public GeneralSettings General { get; set; } = new();
+    public TranslationSettings Translation { get; set; } = new();
+    public ApiSettings Api { get; set; } = new();
+}
+
+public sealed class GeneralSettings
+{
+    public bool TranslationEnabled { get; set; } = true;
+    public bool RunAtWindowsStartup { get; set; }
+    public bool ShowTranslatingPopup { get; set; } = true;
+    public int PopupTimeoutMs { get; set; } = 5000;
+    public bool EnableLogging { get; set; } = true;
+    public int LogRetentionDays { get; set; } = 14;
+}
+
+public sealed class TranslationSettings
+{
+    public string ReadTargetLanguage { get; set; } = "Korean";
+    public string ReplaceTargetLanguage { get; set; } = "English";
+    public string ReplaceFormat { get; set; } = "TranslationWithOriginal";
+    public string ReadHotkey { get; set; } = "Alt+R";
+    public string ReplaceHotkey { get; set; } = "Alt+T";
+    public int MaxInputCharacters { get; set; } = 5000;
+    public int ClipboardCopyTimeoutMs { get; set; } = 2500;
+    public int ClipboardRestoreDelayMs { get; set; } = 300;
+    public int ClipboardRetryCount { get; set; } = 5;
+    public int ClipboardRetryDelayMs { get; set; } = 50;
+    public bool PreferUiAutomation { get; set; }
+}
+
+public sealed class ApiSettings
+{
+    public string Provider { get; set; } = "Gemini";
+    public string Model { get; set; } = "gemini-3.5-flash";
+    public int RequestTimeoutSeconds { get; set; } = 30;
+    public int TransientRetryCount { get; set; } = 2;
+}
