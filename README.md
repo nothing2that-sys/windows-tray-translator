@@ -2,7 +2,7 @@
 
 .NET 8 WinForms 기반의 Windows 트레이 상주형 Gemini 번역 애플리케이션입니다.
 
-현재 구현 범위는 Phase 1~6입니다. 트레이 실행, 번역과 안전한 자동 치환, 통합 설정 UI, 단축키 즉시 재등록, Windows 시작 프로그램 등록까지 구현되어 있습니다.
+Phase 1~7 구현을 완료했습니다. 트레이 실행, 번역과 안전한 자동 치환, 통합 설정 UI, 단축키 즉시 재등록, Windows 시작 프로그램 등록, self-contained 단일 파일 배포를 제공합니다.
 
 ## 요구 환경
 
@@ -71,10 +71,20 @@ dotnet publish src/WindowsTrayTranslator/WindowsTrayTranslator.csproj `
   -p:PublishSingleFile=true `
   -p:IncludeNativeLibrariesForSelfExtract=true `
   -p:PublishTrimmed=false `
+  -p:DebugType=None `
+  -p:DebugSymbols=false `
   -o artifacts/publish/win-x64
 ```
 
-또는 `scripts\publish-windows-x64.bat`을 실행합니다.
+또는 `scripts\publish-windows-x64.bat`을 실행합니다. 스크립트는 기존 출력 폴더를 정리한 다음 self-contained 단일 EXE인지 검사하고 SHA-256 해시를 출력합니다.
+
+최종 산출물:
+
+```text
+artifacts\publish\win-x64\WindowsTrayTranslator.exe
+```
+
+이 EXE에는 .NET 8 Windows x64 런타임이 포함됩니다. 배포 전 실제 프로그램별 검증은 [Phase 7 수동 검증 체크리스트](doc/Phase7_ManualTestChecklist.md)를 사용합니다.
 
 ## 런타임 데이터
 
