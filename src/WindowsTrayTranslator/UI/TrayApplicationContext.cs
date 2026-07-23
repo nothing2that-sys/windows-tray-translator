@@ -88,7 +88,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     private static void ShowAbout() => MessageBox.Show(
-        ".NET 8 기반 Gemini 번역 트레이 애플리케이션\n\n현재 구현 범위: Phase 1~4",
+        ".NET 8 기반 Gemini 번역 트레이 애플리케이션\n\n현재 구현 범위: Phase 1~5",
         "Windows Tray Translator",
         MessageBoxButtons.OK,
         MessageBoxIcon.Information);

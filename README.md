@@ -2,7 +2,7 @@
 
 .NET 8 WinForms 기반의 Windows 트레이 상주형 Gemini 번역 애플리케이션입니다.
 
-현재 구현 범위는 Phase 1~4입니다. 트레이 실행, 중복 실행 방지, 전역 단축키, 선택 문자열 캡처, 클립보드 복원, DPAPI API 키 저장, Gemini 번역, 읽기 결과 팝업까지 구현되어 있습니다. 선택 영역 자동 치환은 Phase 5에서 연결합니다.
+현재 구현 범위는 Phase 1~5입니다. 트레이 실행, 중복 실행 방지, 전역 단축키, 선택 문자열 캡처, 클립보드 복원, DPAPI API 키 저장, Gemini 번역, 읽기 결과 팝업, 작성 번역 자동 치환까지 구현되어 있습니다.
 
 ## 요구 환경
 
@@ -13,9 +13,18 @@
 ## 기본 단축키
 
 - 읽기 번역: `Alt+R`
-- 작성 번역용 캡처: `Alt+T`
+- 작성 번역: `Alt+T`
 
-`Alt+R`은 선택 문자열을 Gemini로 번역하여 커서 근처 팝업에 표시합니다. `Alt+T`는 Phase 5 전까지 선택 문자열 캡처만 확인합니다. 단축키 설정 UI는 Phase 6에서 추가되며, 현재는 `%LOCALAPPDATA%\WindowsTrayTranslator\config\appsettings.json`에서 두 값을 각각 변경할 수 있습니다.
+`Alt+R`은 선택 문자열을 Gemini로 번역하여 커서 근처 팝업에 표시합니다. `Alt+T`는 선택 문자열을 작성 대상 언어로 번역한 뒤 같은 선택 영역을 교체합니다. 단축키 설정 UI는 Phase 6에서 추가되며, 현재는 `%LOCALAPPDATA%\WindowsTrayTranslator\config\appsettings.json`에서 두 값을 각각 변경할 수 있습니다.
+
+작성 결과 형식은 설정 파일의 `Translation.ReplaceFormat`에서 다음 값 중 하나로 지정합니다.
+
+- `TranslationOnly`: 번역문만
+- `TranslationWithOriginal`: 번역문(원문)
+- `OriginalWithTranslation`: 원문(번역문)
+- `TranslationAndOriginalOnNewLine`: 번역문 다음 줄에 (원문)
+
+번역 중 활성 창이나 포커스가 바뀌면 자동 치환하지 않습니다. 결과는 경고 팝업에 표시되며, 사용자가 `복사`를 누른 경우에만 클립보드에 기록됩니다.
 
 선택 문자열은 자동 `Ctrl+C`로 먼저 가져오며, 지원하지 않는 앱에서는 Windows UI Automation으로 한 번 더 시도합니다.
 
@@ -66,6 +75,6 @@ dotnet publish src/WindowsTrayTranslator/WindowsTrayTranslator.csproj `
 
 ## 현재 제한사항
 
-- 작성 번역 자동 치환은 아직 연결되지 않았습니다.
+- 같은 최상위 창 안에서 자체 렌더링된 웹 입력 요소만 바뀌는 경우에는 포커스 변경을 완벽하게 식별하지 못할 수 있습니다.
 - 일부 지연 렌더링 또는 앱 전용 클립보드 형식은 안전하게 백업할 수 없습니다. 이 경우 원본 보호를 위해 캡처를 취소합니다.
 - 현재 프로그램보다 높은 권한으로 실행된 프로그램에는 `SendInput`이 차단될 수 있습니다.

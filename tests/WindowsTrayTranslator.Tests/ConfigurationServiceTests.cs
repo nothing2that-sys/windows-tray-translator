@@ -16,7 +16,7 @@ public sealed class ConfigurationServiceTests : IDisposable
 
         Assert.Equal("Alt+R", settings.Translation.ReadHotkey);
         Assert.Equal("Alt+T", settings.Translation.ReplaceHotkey);
-        Assert.Equal("gemini-3.5-flash", settings.Api.Model);
+        Assert.Equal("gemini-3.5-flash-lite", settings.Api.Model);
         Assert.True(File.Exists(file));
     }
 
@@ -28,7 +28,7 @@ public sealed class ConfigurationServiceTests : IDisposable
         File.WriteAllText(file, """
             {
               "General": { "PopupTimeoutMs": -1, "LogRetentionDays": 1000 },
-              "Translation": { "MaxInputCharacters": 0, "ReadHotkey": "R", "ReplaceHotkey": "Alt+T" },
+              "Translation": { "MaxInputCharacters": 0, "ReadHotkey": "R", "ReplaceHotkey": "Alt+T", "ReplaceFormat": "999" },
               "Api": { "Model": "", "RequestTimeoutSeconds": 999 }
             }
             """);
@@ -39,7 +39,8 @@ public sealed class ConfigurationServiceTests : IDisposable
         Assert.Equal(365, settings.General.LogRetentionDays);
         Assert.Equal(1, settings.Translation.MaxInputCharacters);
         Assert.Equal("Alt+R", settings.Translation.ReadHotkey);
-        Assert.Equal("gemini-3.5-flash", settings.Api.Model);
+        Assert.Equal("TranslationWithOriginal", settings.Translation.ReplaceFormat);
+        Assert.Equal("gemini-3.5-flash-lite", settings.Api.Model);
         Assert.Equal(120, settings.Api.RequestTimeoutSeconds);
     }
 

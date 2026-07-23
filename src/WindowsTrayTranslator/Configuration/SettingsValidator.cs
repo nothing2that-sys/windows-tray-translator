@@ -1,4 +1,5 @@
 using WindowsTrayTranslator.Hotkeys;
+using WindowsTrayTranslator.Translation;
 
 namespace WindowsTrayTranslator.Configuration;
 
@@ -23,7 +24,7 @@ public static class SettingsValidator
 
         settings.Translation.ReadTargetLanguage = NonEmpty(settings.Translation.ReadTargetLanguage, "Korean");
         settings.Translation.ReplaceTargetLanguage = NonEmpty(settings.Translation.ReplaceTargetLanguage, "English");
-        settings.Translation.ReplaceFormat = NonEmpty(settings.Translation.ReplaceFormat, "TranslationWithOriginal");
+        settings.Translation.ReplaceFormat = ValidReplaceFormatOrDefault(settings.Translation.ReplaceFormat);
         settings.Translation.ReadHotkey = NonEmpty(settings.Translation.ReadHotkey, "Alt+R");
         settings.Translation.ReplaceHotkey = NonEmpty(settings.Translation.ReplaceHotkey, "Alt+T");
         settings.Translation.ReadHotkey = ValidHotkeyOrDefault(settings.Translation.ReadHotkey, "Alt+R");
@@ -34,7 +35,7 @@ public static class SettingsValidator
             settings.Translation.ReplaceHotkey = "Alt+T";
         }
         settings.Api.Provider = "Gemini";
-        settings.Api.Model = NonEmpty(settings.Api.Model, "gemini-3.5-flash");
+        settings.Api.Model = NonEmpty(settings.Api.Model, "gemini-3.5-flash-lite");
         return settings;
     }
 
@@ -53,4 +54,9 @@ public static class SettingsValidator
             return fallback;
         }
     }
+
+    private static string ValidReplaceFormatOrDefault(string? value) =>
+        Enum.TryParse(value, ignoreCase: true, out ReplaceOutputFormat format) && Enum.IsDefined(format)
+            ? format.ToString()
+            : ReplaceOutputFormat.TranslationWithOriginal.ToString();
 }

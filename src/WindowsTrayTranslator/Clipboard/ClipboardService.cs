@@ -128,34 +128,60 @@ public sealed class ClipboardService : IClipboardService
 
     public uint GetSequenceNumber() => NativeClipboardMethods.GetClipboardSequenceNumber();
 
-    public async Task PasteTextAsync(
+    public async Task<PasteTextResult> PasteTextAsync(
         string text,
         ClipboardSnapshot snapshotToRestore,
         int restoreDelayMs,
+        Func<bool> isTargetStillActive,
         CancellationToken cancellationToken)
     {
-        SetText(text);
-        uint expectedSequence = GetSequenceNumber();
+        if (!await keyboard.WaitForModifiersReleasedAsync(1500, cancellationToken))
+        {
+            throw new InvalidOperationException("단축키 modifier가 해제되지 않아 붙여넣기를 취소했습니다.");
+        }
+
+        if (!isTargetStillActive())
+        {
+            return PasteTextResult.TargetChanged;
+        }
+
+        uint expectedSequence = 0;
         try
         {
-            if (!await keyboard.WaitForModifiersReleasedAsync(1500, cancellationToken))
+            SetText(text);
+            expectedSequence = GetSequenceNumber();
+            if (!isTargetStillActive())
             {
-                throw new InvalidOperationException("단축키 modifier가 해제되지 않아 붙여넣기를 취소했습니다.");
+                return PasteTextResult.TargetChanged;
             }
+
+            if (GetSequenceNumber() != expectedSequence)
+            {
+                logger.Warning("붙여넣기 전에 클립보드가 외부에서 변경되어 자동 치환을 취소합니다.");
+                return PasteTextResult.ClipboardChanged;
+            }
+
             keyboard.SendPaste();
             await Task.Delay(restoreDelayMs, cancellationToken);
+            return PasteTextResult.Success;
         }
         finally
         {
-            if (GetSequenceNumber() == expectedSequence)
+            if (ClipboardRestoreGuard.ShouldRestore(expectedSequence, GetSequenceNumber()))
             {
                 Restore(snapshotToRestore);
             }
-            else
+            else if (expectedSequence != 0)
             {
                 logger.Warning("붙여넣기 대기 중 클립보드가 변경되어 기존 스냅샷 복원을 생략합니다.");
             }
         }
+    }
+
+    internal static class ClipboardRestoreGuard
+    {
+        public static bool ShouldRestore(uint expectedSequence, uint currentSequence) =>
+            expectedSequence != 0 && expectedSequence == currentSequence;
     }
 
     internal static object? CloneSupportedValue(object? value) => value switch

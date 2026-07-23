@@ -27,7 +27,13 @@ public sealed class SettingsForm : Form
         ShowInTaskbar = false;
         ClientSize = new Size(520, 285);
 
-        modelComboBox.Items.Add("gemini-3.5-flash");
+        modelComboBox.Items.AddRange(
+        [
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash"
+        ]);
         modelComboBox.Text = controller.Settings.Api.Model;
         RefreshSavedKeyLabel();
 

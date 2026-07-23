@@ -164,7 +164,7 @@ public sealed class ApplicationController : IDisposable
             }
             else
             {
-                Notify($"작성 번역용 문자열 캡처 확인 완료 ({result.Text!.Length}자)\n자동 치환은 Phase 5에서 연결됩니다.", ToolTipIcon.Info);
+                await ExecuteReplaceTranslationAsync(result.Text!, result.SourceWindow, shutdown.Token);
             }
         }
         catch (OperationCanceledException)
@@ -205,6 +205,86 @@ public sealed class ApplicationController : IDisposable
 
         logger.Information($"읽기 번역을 완료했습니다. InputCharacters={originalText.Length}, OutputCharacters={translation.TranslatedText!.Length}");
         ShowPopup(TranslationPopupKind.Success, translation.TranslatedText!, translation.TranslatedText);
+    }
+
+    private async Task ExecuteReplaceTranslationAsync(
+        string originalText,
+        WindowIdentity sourceWindow,
+        CancellationToken cancellationToken)
+    {
+        ShowPopup(TranslationPopupKind.Translating, "번역 중...");
+        TranslationResult translation = await TranslationProvider.TranslateAsync(
+            new TranslationRequest(originalText, Settings.Translation.ReplaceTargetLanguage),
+            cancellationToken);
+
+        if (!translation.IsSuccess)
+        {
+            logger.Warning($"작성 번역에 실패했습니다. Kind={translation.FailureKind}, Characters={originalText.Length}");
+            ShowPopup(TranslationPopupKind.Error, translation.ErrorMessage ?? "번역에 실패했습니다.");
+            return;
+        }
+
+        string replacement = ReplaceOutputFormatter.Format(
+            originalText,
+            translation.TranslatedText!,
+            ReplaceOutputFormatter.Parse(Settings.Translation.ReplaceFormat));
+
+        if (!activeWindow.IsStillActive(sourceWindow))
+        {
+            ShowChangedTargetWarning(replacement);
+            return;
+        }
+
+        using ClipboardSnapshot snapshot = clipboard.CaptureSnapshot();
+        if (!activeWindow.IsStillActive(sourceWindow))
+        {
+            ShowChangedTargetWarning(replacement);
+            return;
+        }
+
+        try
+        {
+            PasteTextResult pasteResult = await clipboard.PasteTextAsync(
+                replacement,
+                snapshot,
+                Settings.Translation.ClipboardRestoreDelayMs,
+                () => activeWindow.IsStillActive(sourceWindow),
+                cancellationToken);
+            if (pasteResult == PasteTextResult.TargetChanged)
+            {
+                ShowChangedTargetWarning(replacement);
+                return;
+            }
+            if (pasteResult == PasteTextResult.ClipboardChanged)
+            {
+                logger.Warning("클립보드가 변경되어 작성 번역 자동 치환을 취소했습니다.");
+                ShowPopup(
+                    TranslationPopupKind.Warning,
+                    $"클립보드가 변경되어 자동 치환을 취소했습니다.\r\n번역 결과를 확인한 후 복사 버튼을 눌러 주세요.\r\n\r\n{replacement}",
+                    replacement);
+                return;
+            }
+
+            logger.Information($"작성 번역을 완료했습니다. InputCharacters={originalText.Length}, OutputCharacters={replacement.Length}");
+            ShowPopup(TranslationPopupKind.Success, "선택 영역을 번역문으로 교체했습니다.");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            logger.Error("작성 번역 결과를 붙여넣지 못했습니다.", ex);
+            ShowPopup(
+                TranslationPopupKind.Warning,
+                $"자동 입력에 실패했습니다. 번역 결과를 확인한 후 복사 버튼을 눌러 주세요.\r\n\r\n{replacement}",
+                replacement);
+        }
+    }
+
+    private void ShowChangedTargetWarning(string replacement)
+    {
+        logger.Warning("활성 창 또는 포커스가 변경되어 작성 번역 자동 치환을 취소했습니다.");
+        ShowPopup(
+            TranslationPopupKind.Warning,
+            $"활성 창이 변경되어 자동 치환을 취소했습니다.\r\n번역 결과를 확인한 후 복사 버튼을 눌러 주세요.\r\n\r\n{replacement}",
+            replacement);
     }
 
     private void Notify(string message, ToolTipIcon icon) =>

@@ -35,7 +35,7 @@ public sealed class TranslationSettings
 public sealed class ApiSettings
 {
     public string Provider { get; set; } = "Gemini";
-    public string Model { get; set; } = "gemini-3.5-flash";
+    public string Model { get; set; } = "gemini-3.5-flash-lite";
     public int RequestTimeoutSeconds { get; set; } = 30;
     public int TransientRetryCount { get; set; } = 2;
 }
