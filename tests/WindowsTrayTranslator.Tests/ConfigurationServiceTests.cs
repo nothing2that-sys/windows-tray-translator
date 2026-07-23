@@ -61,6 +61,23 @@ public sealed class ConfigurationServiceTests : IDisposable
         Assert.Equal("Alt+T", settings.Translation.ReplaceHotkey);
     }
 
+    [Fact]
+    public void Load_LegacyAutoTargets_MigratesThemToSelect()
+    {
+        Directory.CreateDirectory(directory);
+        string file = Path.Combine(directory, "appsettings.json");
+        File.WriteAllText(file, """
+            {
+              "Translation": { "ReadTargetLanguage": "Auto", "ReplaceTargetLanguage": "Auto" }
+            }
+            """);
+
+        AppSettings settings = new ConfigurationService(file, new TestLogger()).Load();
+
+        Assert.Equal("Select", settings.Translation.ReadTargetLanguage);
+        Assert.Equal("Select", settings.Translation.ReplaceTargetLanguage);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory))

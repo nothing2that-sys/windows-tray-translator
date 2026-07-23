@@ -11,13 +11,20 @@ public sealed class GlobalHotkeyService : IDisposable
 
     private readonly HotkeyWindow window;
     private readonly ILogger logger;
+    private readonly IHotkeyRegistrar registrar;
     private HotkeyDefinition? currentRead;
     private HotkeyDefinition? currentReplace;
 
     public GlobalHotkeyService(Action<int> callback, ILogger logger)
+        : this(callback, logger, new NativeHotkeyRegistrar())
+    {
+    }
+
+    internal GlobalHotkeyService(Action<int> callback, ILogger logger, IHotkeyRegistrar registrar)
     {
         window = new HotkeyWindow(callback);
         this.logger = logger;
+        this.registrar = registrar;
     }
 
     public void Register(string readHotkey, string replaceHotkey)
@@ -52,7 +59,7 @@ public sealed class GlobalHotkeyService : IDisposable
     private void RegisterOne(int id, HotkeyDefinition definition)
     {
         uint modifiers = (uint)(definition.Modifiers | HotkeyModifiers.NoRepeat);
-        if (!NativeHotkeyMethods.RegisterHotKey(window.Handle, id, modifiers, definition.VirtualKey))
+        if (!registrar.Register(window.Handle, id, modifiers, definition.VirtualKey))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "해당 단축키는 다른 프로그램에서 사용 중입니다.");
         }
@@ -84,20 +91,38 @@ public sealed class GlobalHotkeyService : IDisposable
     {
         if (currentRead is not null)
         {
-            NativeHotkeyMethods.UnregisterHotKey(window.Handle, ReadHotkeyId);
+            registrar.Unregister(window.Handle, ReadHotkeyId);
             currentRead = null;
         }
 
         if (currentReplace is not null)
         {
-            NativeHotkeyMethods.UnregisterHotKey(window.Handle, ReplaceHotkeyId);
+            registrar.Unregister(window.Handle, ReplaceHotkeyId);
             currentReplace = null;
         }
     }
+
+    internal HotkeyDefinition? CurrentRead => currentRead;
+    internal HotkeyDefinition? CurrentReplace => currentReplace;
 
     public void Dispose()
     {
         UnregisterCurrent();
         window.Dispose();
     }
+}
+
+internal interface IHotkeyRegistrar
+{
+    bool Register(IntPtr windowHandle, int id, uint modifiers, uint virtualKey);
+    void Unregister(IntPtr windowHandle, int id);
+}
+
+internal sealed class NativeHotkeyRegistrar : IHotkeyRegistrar
+{
+    public bool Register(IntPtr windowHandle, int id, uint modifiers, uint virtualKey) =>
+        NativeHotkeyMethods.RegisterHotKey(windowHandle, id, modifiers, virtualKey);
+
+    public void Unregister(IntPtr windowHandle, int id) =>
+        NativeHotkeyMethods.UnregisterHotKey(windowHandle, id);
 }

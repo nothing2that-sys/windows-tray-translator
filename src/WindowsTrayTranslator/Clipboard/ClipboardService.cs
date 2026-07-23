@@ -8,8 +8,8 @@ namespace WindowsTrayTranslator.Clipboard;
 
 public sealed class ClipboardService : IClipboardService
 {
-    private readonly int retryCount;
-    private readonly int retryDelayMs;
+    private int retryCount;
+    private int retryDelayMs;
     private readonly KeyboardInputService keyboard;
     private readonly ILogger logger;
 
@@ -19,6 +19,12 @@ public sealed class ClipboardService : IClipboardService
         this.retryDelayMs = retryDelayMs;
         this.keyboard = keyboard;
         this.logger = logger;
+    }
+
+    public void Configure(int newRetryCount, int newRetryDelayMs)
+    {
+        retryCount = Math.Clamp(newRetryCount, 1, 20);
+        retryDelayMs = Math.Clamp(newRetryDelayMs, 10, 1000);
     }
 
     public ClipboardSnapshot CaptureSnapshot()

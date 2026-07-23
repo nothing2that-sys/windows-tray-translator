@@ -125,13 +125,21 @@ public sealed class GeminiApiClient
                     [
                         new GeminiPart
                         {
-                            Text = $"Target language: {request.TargetLanguage}\n\nText:\n{request.OriginalText}"
+                            Text = $"Translation instruction: {BuildTargetLanguageInstruction(request.TargetLanguage)}\n\nText:\n{request.OriginalText}"
                         }
                     ]
                 }
             ]
         };
         return JsonSerializer.Serialize(payload, JsonOptions);
+    }
+
+    internal static string BuildTargetLanguageInstruction(string targetLanguage)
+    {
+        string normalized = targetLanguage?.Trim() ?? string.Empty;
+        return string.Equals(normalized, "Auto", StringComparison.OrdinalIgnoreCase)
+            ? "Detect the source language. If the text is predominantly Korean, translate it to English; otherwise translate it to Korean."
+            : $"Translate to {normalized}.";
     }
 
     private static bool IsTransient(HttpStatusCode statusCode) =>

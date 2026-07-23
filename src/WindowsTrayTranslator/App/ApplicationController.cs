@@ -4,6 +4,7 @@ using WindowsTrayTranslator.Hotkeys;
 using WindowsTrayTranslator.Logging;
 using WindowsTrayTranslator.Security;
 using WindowsTrayTranslator.Selection;
+using WindowsTrayTranslator.Startup;
 using WindowsTrayTranslator.Translation;
 using WindowsTrayTranslator.Translation.Gemini;
 using WindowsTrayTranslator.Windows;
@@ -17,11 +18,13 @@ public sealed class ApplicationController : IDisposable
     private readonly KeyboardInputService keyboard;
     private readonly ClipboardService clipboard;
     private readonly ActiveWindowService activeWindow;
-    private readonly ISelectedTextProvider selectedTextProvider;
+    private readonly ISelectedTextProvider clipboardFirstTextProvider;
+    private readonly ISelectedTextProvider uiAutomationFirstTextProvider;
     private readonly GlobalHotkeyService hotkeys;
     private readonly DpapiSecretStore secretStore;
     private readonly HttpClient httpClient;
     private readonly GeminiApiClient geminiClient;
+    private readonly StartupRegistrationService startupRegistration;
     private readonly SemaphoreSlim operationGate = new(1, 1);
     private readonly CancellationTokenSource shutdown = new();
 
@@ -45,10 +48,13 @@ public sealed class ApplicationController : IDisposable
         activeWindow = new ActiveWindowService();
         ISelectedTextProvider clipboardProvider = new ClipboardSelectedTextProvider(clipboard, keyboard, activeWindow, logger);
         ISelectedTextProvider uiAutomationProvider = new UiAutomationSelectedTextProvider(activeWindow, logger);
-        selectedTextProvider = new CompositeSelectedTextProvider(clipboardProvider, uiAutomationProvider, logger);
+        clipboardFirstTextProvider = new CompositeSelectedTextProvider(clipboardProvider, uiAutomationProvider, logger);
+        uiAutomationFirstTextProvider = new CompositeSelectedTextProvider(uiAutomationProvider, clipboardProvider, logger);
         secretStore = new DpapiSecretStore(paths.SecretFile);
         httpClient = new HttpClient();
         geminiClient = new GeminiApiClient(httpClient, logger);
+        startupRegistration = new StartupRegistrationService(
+            Environment.ProcessPath ?? Application.ExecutablePath);
         TranslationProvider = new GeminiTranslationProvider(geminiClient, secretStore, () => Settings);
 
         hotkeys = new GlobalHotkeyService(OnHotkeyPressed, logger);
@@ -65,12 +71,29 @@ public sealed class ApplicationController : IDisposable
 
     public event EventHandler<UserNotificationEventArgs>? NotificationRequested;
     public event EventHandler<TranslationPopupRequestedEventArgs>? TranslationPopupRequested;
+    public event EventHandler<LanguageSelectionRequestedEventArgs>? LanguageSelectionRequested;
+    public event EventHandler? SettingsApplied;
 
     public AppPaths Paths { get; }
     public AppSettings Settings { get; }
     public ITranslationProvider TranslationProvider { get; }
     public string? StartupWarning { get; }
     public bool HasApiKey => secretStore.HasSecret(SecretNames.GeminiApiKey);
+    public bool IsStartupEnabled
+    {
+        get
+        {
+            try
+            {
+                return startupRegistration.IsEnabled();
+            }
+            catch (Exception ex)
+            {
+                logger.Error("Windows 시작 프로그램 등록 상태를 확인하지 못했습니다.", ex);
+                return Settings.General.RunAtWindowsStartup;
+            }
+        }
+    }
 
     public void SetTranslationEnabled(bool enabled)
     {
@@ -95,13 +118,72 @@ public sealed class ApplicationController : IDisposable
         logger.Information($"API 설정을 저장했습니다. Provider=Gemini, Model={Settings.Api.Model}, HasKey={HasApiKey}");
     }
 
+    public void ApplySettings(AppSettings candidate, string? newApiKey)
+    {
+        HotkeyDefinition read = HotkeyDefinition.Parse(candidate.Translation.ReadHotkey);
+        HotkeyDefinition replace = HotkeyDefinition.Parse(candidate.Translation.ReplaceHotkey);
+        if (read == replace)
+        {
+            throw new InvalidOperationException("읽기 번역과 작성 번역에 같은 단축키를 사용할 수 없습니다.");
+        }
+
+        SettingsValidator.Normalize(candidate);
+        AppSettings previous = CloneSettings(Settings);
+        bool previousStartup = startupRegistration.IsEnabled();
+        string? previousApiKey = secretStore.ReadSecret(SecretNames.GeminiApiKey);
+        bool apiKeyChanged = !string.IsNullOrWhiteSpace(newApiKey);
+
+        try
+        {
+            if (apiKeyChanged)
+            {
+                secretStore.WriteSecret(SecretNames.GeminiApiKey, newApiKey!);
+            }
+
+            hotkeys.Register(candidate.Translation.ReadHotkey, candidate.Translation.ReplaceHotkey);
+            startupRegistration.SetEnabled(candidate.General.RunAtWindowsStartup);
+            configuration.Save(candidate);
+            CopySettings(candidate, Settings);
+            clipboard.Configure(
+                Settings.Translation.ClipboardRetryCount,
+                Settings.Translation.ClipboardRetryDelayMs);
+            if (logger is FileLogger fileLogger)
+            {
+                fileLogger.Configure(Settings.General.EnableLogging, Settings.General.LogRetentionDays);
+            }
+
+            logger.Information("설정을 저장하고 즉시 적용했습니다.");
+        }
+        catch
+        {
+            TryRollbackSettings(previous, previousStartup, previousApiKey, apiKeyChanged);
+            throw;
+        }
+
+        try
+        {
+            SettingsApplied?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            logger.Error("설정 적용 알림 처리 중 오류가 발생했습니다.", ex);
+        }
+    }
+
     public void DeleteApiKey()
     {
         secretStore.DeleteSecret(SecretNames.GeminiApiKey);
         logger.Information("저장된 Gemini API 키를 삭제했습니다.");
     }
 
-    public async Task<TranslationResult> TestConnectionAsync(string? unsavedApiKey, CancellationToken cancellationToken)
+    public Task<TranslationResult> TestConnectionAsync(string? unsavedApiKey, CancellationToken cancellationToken) =>
+        TestConnectionAsync(unsavedApiKey, Settings.Api.Model, Settings.Api.RequestTimeoutSeconds, cancellationToken);
+
+    public async Task<TranslationResult> TestConnectionAsync(
+        string? unsavedApiKey,
+        string model,
+        int timeoutSeconds,
+        CancellationToken cancellationToken)
     {
         string? apiKey = string.IsNullOrWhiteSpace(unsavedApiKey)
             ? secretStore.ReadSecret(SecretNames.GeminiApiKey)
@@ -114,9 +196,9 @@ public sealed class ApplicationController : IDisposable
 
         return await geminiClient.TranslateAsync(
             apiKey,
-            Settings.Api.Model,
+            model.Trim(),
             new TranslationRequest("Hello.", "Korean"),
-            Settings.Api.RequestTimeoutSeconds,
+            timeoutSeconds,
             Settings.Api.TransientRetryCount,
             cancellationToken);
     }
@@ -139,6 +221,24 @@ public sealed class ApplicationController : IDisposable
         try
         {
             WindowIdentity sourceWindow = activeWindow.Capture();
+            string configuredTargetLanguage = hotkeyId == GlobalHotkeyService.ReadHotkeyId
+                ? Settings.Translation.ReadTargetLanguage
+                : Settings.Translation.ReplaceTargetLanguage;
+            string? targetLanguage = await ResolveTargetLanguageAsync(configuredTargetLanguage, shutdown.Token);
+            if (targetLanguage is null)
+            {
+                return;
+            }
+
+            if (!activeWindow.IsStillActive(sourceWindow))
+            {
+                ShowPopup(TranslationPopupKind.Warning, "입력 위치가 변경되어 번역을 취소했습니다.");
+                return;
+            }
+
+            ISelectedTextProvider selectedTextProvider = Settings.Translation.PreferUiAutomation
+                ? uiAutomationFirstTextProvider
+                : clipboardFirstTextProvider;
             SelectedTextResult result = await selectedTextProvider.GetSelectedTextAsync(
                 sourceWindow,
                 Settings.Translation.ClipboardCopyTimeoutMs,
@@ -160,11 +260,11 @@ public sealed class ApplicationController : IDisposable
 
             if (hotkeyId == GlobalHotkeyService.ReadHotkeyId)
             {
-                await ExecuteReadTranslationAsync(result.Text!, shutdown.Token);
+                await ExecuteReadTranslationAsync(result.Text!, targetLanguage, shutdown.Token);
             }
             else
             {
-                await ExecuteReplaceTranslationAsync(result.Text!, result.SourceWindow, shutdown.Token);
+                await ExecuteReplaceTranslationAsync(result.Text!, result.SourceWindow, targetLanguage, shutdown.Token);
             }
         }
         catch (OperationCanceledException)
@@ -189,11 +289,17 @@ public sealed class ApplicationController : IDisposable
         }
     }
 
-    private async Task ExecuteReadTranslationAsync(string originalText, CancellationToken cancellationToken)
+    private async Task ExecuteReadTranslationAsync(
+        string originalText,
+        string targetLanguage,
+        CancellationToken cancellationToken)
     {
-        ShowPopup(TranslationPopupKind.Translating, "번역 중...");
+        if (Settings.General.ShowTranslatingPopup)
+        {
+            ShowPopup(TranslationPopupKind.Translating, "번역 중...");
+        }
         TranslationResult translation = await TranslationProvider.TranslateAsync(
-            new TranslationRequest(originalText, Settings.Translation.ReadTargetLanguage),
+            new TranslationRequest(originalText, targetLanguage),
             cancellationToken);
 
         if (!translation.IsSuccess)
@@ -210,11 +316,15 @@ public sealed class ApplicationController : IDisposable
     private async Task ExecuteReplaceTranslationAsync(
         string originalText,
         WindowIdentity sourceWindow,
+        string targetLanguage,
         CancellationToken cancellationToken)
     {
-        ShowPopup(TranslationPopupKind.Translating, "번역 중...");
+        if (Settings.General.ShowTranslatingPopup)
+        {
+            ShowPopup(TranslationPopupKind.Translating, "번역 중...");
+        }
         TranslationResult translation = await TranslationProvider.TranslateAsync(
-            new TranslationRequest(originalText, Settings.Translation.ReplaceTargetLanguage),
+            new TranslationRequest(originalText, targetLanguage),
             cancellationToken);
 
         if (!translation.IsSuccess)
@@ -287,6 +397,88 @@ public sealed class ApplicationController : IDisposable
             replacement);
     }
 
+    private async Task<string?> ResolveTargetLanguageAsync(
+        string configuredTargetLanguage,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(configuredTargetLanguage, "Select", StringComparison.OrdinalIgnoreCase))
+        {
+            return configuredTargetLanguage;
+        }
+
+        LanguageSelectionRequestedEventArgs request = new();
+        LanguageSelectionRequested?.Invoke(this, request);
+        if (!request.WasHandled)
+        {
+            ShowPopup(TranslationPopupKind.Error, "언어 선택 창을 표시하지 못했습니다.");
+            return null;
+        }
+
+        return await request.Selection.WaitAsync(cancellationToken);
+    }
+
+    private void TryRollbackSettings(
+        AppSettings previous,
+        bool previousStartup,
+        string? previousApiKey,
+        bool apiKeyChanged)
+    {
+        try
+        {
+            hotkeys.Register(previous.Translation.ReadHotkey, previous.Translation.ReplaceHotkey);
+            startupRegistration.SetEnabled(previousStartup);
+            if (apiKeyChanged)
+            {
+                if (string.IsNullOrEmpty(previousApiKey))
+                {
+                    secretStore.DeleteSecret(SecretNames.GeminiApiKey);
+                }
+                else
+                {
+                    secretStore.WriteSecret(SecretNames.GeminiApiKey, previousApiKey);
+                }
+            }
+        }
+        catch (Exception rollbackError)
+        {
+            logger.Error("설정 변경 실패 후 기존 상태를 복구하지 못했습니다.", rollbackError);
+        }
+    }
+
+    private static AppSettings CloneSettings(AppSettings source)
+    {
+        AppSettings clone = new();
+        CopySettings(source, clone);
+        return clone;
+    }
+
+    private static void CopySettings(AppSettings source, AppSettings target)
+    {
+        target.General.TranslationEnabled = source.General.TranslationEnabled;
+        target.General.RunAtWindowsStartup = source.General.RunAtWindowsStartup;
+        target.General.ShowTranslatingPopup = source.General.ShowTranslatingPopup;
+        target.General.PopupTimeoutMs = source.General.PopupTimeoutMs;
+        target.General.EnableLogging = source.General.EnableLogging;
+        target.General.LogRetentionDays = source.General.LogRetentionDays;
+
+        target.Translation.ReadTargetLanguage = source.Translation.ReadTargetLanguage;
+        target.Translation.ReplaceTargetLanguage = source.Translation.ReplaceTargetLanguage;
+        target.Translation.ReplaceFormat = source.Translation.ReplaceFormat;
+        target.Translation.ReadHotkey = source.Translation.ReadHotkey;
+        target.Translation.ReplaceHotkey = source.Translation.ReplaceHotkey;
+        target.Translation.MaxInputCharacters = source.Translation.MaxInputCharacters;
+        target.Translation.ClipboardCopyTimeoutMs = source.Translation.ClipboardCopyTimeoutMs;
+        target.Translation.ClipboardRestoreDelayMs = source.Translation.ClipboardRestoreDelayMs;
+        target.Translation.ClipboardRetryCount = source.Translation.ClipboardRetryCount;
+        target.Translation.ClipboardRetryDelayMs = source.Translation.ClipboardRetryDelayMs;
+        target.Translation.PreferUiAutomation = source.Translation.PreferUiAutomation;
+
+        target.Api.Provider = source.Api.Provider;
+        target.Api.Model = source.Api.Model;
+        target.Api.RequestTimeoutSeconds = source.Api.RequestTimeoutSeconds;
+        target.Api.TransientRetryCount = source.Api.TransientRetryCount;
+    }
+
     private void Notify(string message, ToolTipIcon icon) =>
         NotificationRequested?.Invoke(this, new UserNotificationEventArgs(message, icon));
 
@@ -331,4 +523,16 @@ public sealed class TranslationPopupRequestedEventArgs(
     public string Message { get; } = message;
     public string? CopyText { get; } = copyText;
     public int TimeoutMs { get; } = timeoutMs;
+}
+
+public sealed class LanguageSelectionRequestedEventArgs : EventArgs
+{
+    private readonly TaskCompletionSource<string?> completion =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public Task<string?> Selection => completion.Task;
+    public bool WasHandled { get; private set; }
+
+    public void MarkHandled() => WasHandled = true;
+    public void Complete(string? language) => completion.TrySetResult(language);
 }

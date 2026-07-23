@@ -13,6 +13,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem enabledItem;
     private SettingsForm? settingsForm;
     private TranslationPopupForm? translationPopup;
+    private LanguageSelectionPopupForm? languageSelectionPopup;
 
     public TrayApplicationContext(ApplicationController controller, ILogger logger)
     {
@@ -45,6 +46,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         notifyIcon.DoubleClick += (_, _) => OpenSettings();
         controller.NotificationRequested += OnNotificationRequested;
         controller.TranslationPopupRequested += OnTranslationPopupRequested;
+        controller.SettingsApplied += OnSettingsApplied;
+        controller.LanguageSelectionRequested += OnLanguageSelectionRequested;
 
         if (!string.IsNullOrWhiteSpace(controller.StartupWarning))
         {
@@ -88,7 +91,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     private static void ShowAbout() => MessageBox.Show(
-        ".NET 8 기반 Gemini 번역 트레이 애플리케이션\n\n현재 구현 범위: Phase 1~5",
+        ".NET 8 기반 Gemini 번역 트레이 애플리케이션\n\n현재 구현 범위: Phase 1~6",
         "Windows Tray Translator",
         MessageBoxButtons.OK,
         MessageBoxIcon.Information);
@@ -107,6 +110,23 @@ public sealed class TrayApplicationContext : ApplicationContext
         translationPopup.ShowContent(e.Kind, e.Message, e.CopyText, e.TimeoutMs);
     }
 
+    private void OnSettingsApplied(object? sender, EventArgs e)
+    {
+        if (enabledItem.Checked != controller.Settings.General.TranslationEnabled)
+        {
+            enabledItem.Checked = controller.Settings.General.TranslationEnabled;
+        }
+    }
+
+    private void OnLanguageSelectionRequested(object? sender, LanguageSelectionRequestedEventArgs e)
+    {
+        e.MarkHandled();
+        languageSelectionPopup?.Close();
+        languageSelectionPopup = new LanguageSelectionPopupForm(e);
+        languageSelectionPopup.FormClosed += (_, _) => languageSelectionPopup = null;
+        languageSelectionPopup.Show();
+    }
+
     private void ShowBalloon(string message, ToolTipIcon icon)
     {
         notifyIcon.BalloonTipTitle = "Windows Tray Translator";
@@ -119,6 +139,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         settingsForm?.Close();
         translationPopup?.Close();
+        languageSelectionPopup?.Close();
         notifyIcon.Visible = false;
         ExitThread();
     }
@@ -129,7 +150,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             controller.NotificationRequested -= OnNotificationRequested;
             controller.TranslationPopupRequested -= OnTranslationPopupRequested;
+            controller.SettingsApplied -= OnSettingsApplied;
+            controller.LanguageSelectionRequested -= OnLanguageSelectionRequested;
             translationPopup?.Dispose();
+            languageSelectionPopup?.Dispose();
             notifyIcon.Dispose();
         }
 

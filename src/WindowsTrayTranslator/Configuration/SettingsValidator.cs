@@ -22,8 +22,8 @@ public static class SettingsValidator
         settings.Api.RequestTimeoutSeconds = Math.Clamp(settings.Api.RequestTimeoutSeconds, 5, 120);
         settings.Api.TransientRetryCount = Math.Clamp(settings.Api.TransientRetryCount, 0, 5);
 
-        settings.Translation.ReadTargetLanguage = NonEmpty(settings.Translation.ReadTargetLanguage, "Korean");
-        settings.Translation.ReplaceTargetLanguage = NonEmpty(settings.Translation.ReplaceTargetLanguage, "English");
+        settings.Translation.ReadTargetLanguage = ValidSelectableTargetLanguage(settings.Translation.ReadTargetLanguage, "Korean");
+        settings.Translation.ReplaceTargetLanguage = ValidReplaceTargetLanguage(settings.Translation.ReplaceTargetLanguage);
         settings.Translation.ReplaceFormat = ValidReplaceFormatOrDefault(settings.Translation.ReplaceFormat);
         settings.Translation.ReadHotkey = NonEmpty(settings.Translation.ReadHotkey, "Alt+R");
         settings.Translation.ReplaceHotkey = NonEmpty(settings.Translation.ReplaceHotkey, "Alt+T");
@@ -59,4 +59,17 @@ public static class SettingsValidator
         Enum.TryParse(value, ignoreCase: true, out ReplaceOutputFormat format) && Enum.IsDefined(format)
             ? format.ToString()
             : ReplaceOutputFormat.TranslationWithOriginal.ToString();
+
+    private static string ValidReplaceTargetLanguage(string? value)
+    {
+        return ValidSelectableTargetLanguage(value, "English");
+    }
+
+    private static string ValidSelectableTargetLanguage(string? value, string fallback)
+    {
+        string normalized = NonEmpty(value, fallback);
+        return string.Equals(normalized, "Auto", StringComparison.OrdinalIgnoreCase)
+            ? "Select"
+            : normalized;
+    }
 }

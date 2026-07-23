@@ -38,7 +38,7 @@ public sealed class UiAutomationSelectedTextProvider : ISelectedTextProvider
             if (string.IsNullOrWhiteSpace(text))
             {
                 logger.Warning($"UI Automation에서 선택 문자열을 찾지 못했습니다. Process={sourceWindow.ProcessName}");
-                return SelectedTextResult.Failure("선택된 문자열을 가져오지 못했습니다.", sourceWindow, canFallback: false);
+                return SelectedTextResult.Failure("선택된 문자열을 가져오지 못했습니다.", sourceWindow);
             }
 
             text = text.TrimEnd('\r', '\n');
@@ -56,7 +56,7 @@ public sealed class UiAutomationSelectedTextProvider : ISelectedTextProvider
         catch (TimeoutException)
         {
             logger.Warning($"UI Automation 선택 문자열 조회 시간이 초과됐습니다. Process={sourceWindow.ProcessName}, TimeoutMs={timeoutMs}");
-            return SelectedTextResult.Failure("선택된 문자열을 가져오지 못했습니다.", sourceWindow, canFallback: false);
+            return SelectedTextResult.Failure("선택된 문자열을 가져오지 못했습니다.", sourceWindow);
         }
         catch (OperationCanceledException)
         {
@@ -65,7 +65,7 @@ public sealed class UiAutomationSelectedTextProvider : ISelectedTextProvider
         catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException or COMException)
         {
             logger.Warning($"UI Automation 선택 문자열 조회를 지원하지 않습니다. Process={sourceWindow.ProcessName}, Error={ex.GetType().Name}");
-            return SelectedTextResult.Failure("선택된 문자열을 가져오지 못했습니다.", sourceWindow, canFallback: false);
+            return SelectedTextResult.Failure("선택된 문자열을 가져오지 못했습니다.", sourceWindow);
         }
     }
 

@@ -36,7 +36,7 @@ public sealed class CompositeSelectedTextProvider : ISelectedTextProvider
             return primaryResult;
         }
 
-        logger.Information($"클립보드 캡처 실패 후 UI Automation 폴백을 시도합니다. Process={sourceWindow.ProcessName}");
+        logger.Information($"기본 선택 문자열 획득 실패 후 보조 방식을 시도합니다. Process={sourceWindow.ProcessName}");
         return await fallback.GetSelectedTextAsync(
             sourceWindow,
             timeoutMs,
