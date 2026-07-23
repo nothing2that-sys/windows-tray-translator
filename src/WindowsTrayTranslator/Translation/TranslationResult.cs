@@ -12,6 +12,7 @@ public enum TranslationFailureKind
     EmptyResponse,
     SafetyBlocked,
     InvalidResponse,
+    ModelUnavailable,
     InvalidRequest,
     Cancelled
 }

@@ -7,7 +7,11 @@ public sealed class SettingsForm : Form
 {
     private readonly ApplicationController controller;
     private readonly TextBox apiKeyTextBox = new() { UseSystemPasswordChar = true, Dock = DockStyle.Fill };
-    private readonly TextBox modelTextBox = new() { Dock = DockStyle.Fill };
+    private readonly ComboBox modelComboBox = new()
+    {
+        Dock = DockStyle.Fill,
+        DropDownStyle = ComboBoxStyle.DropDown
+    };
     private readonly Label savedKeyLabel = new() { AutoSize = true };
     private readonly Label statusLabel = new() { AutoSize = true, MaximumSize = new Size(420, 0) };
     private readonly Button testButton = new() { Text = "API 연결 테스트", AutoSize = true };
@@ -23,7 +27,8 @@ public sealed class SettingsForm : Form
         ShowInTaskbar = false;
         ClientSize = new Size(520, 285);
 
-        modelTextBox.Text = controller.Settings.Api.Model;
+        modelComboBox.Items.Add("gemini-3.5-flash");
+        modelComboBox.Text = controller.Settings.Api.Model;
         RefreshSavedKeyLabel();
 
         TableLayoutPanel table = new()
@@ -43,7 +48,7 @@ public sealed class SettingsForm : Form
         table.Controls.Add(new Label { Text = "저장 상태", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
         table.Controls.Add(savedKeyLabel, 1, 2);
         table.Controls.Add(new Label { Text = "모델", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
-        table.Controls.Add(modelTextBox, 1, 3);
+        table.Controls.Add(modelComboBox, 1, 3);
 
         FlowLayoutPanel actions = new() { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
         Button saveButton = new() { Text = "저장", AutoSize = true };
@@ -64,7 +69,7 @@ public sealed class SettingsForm : Form
         {
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
-            Text = "Phase 3에서는 API 설정만 제공합니다. 언어와 단축키 UI는 Phase 6에서 추가됩니다."
+            Text = "현재 설정 화면은 API 설정만 제공합니다. 언어와 단축키 UI는 Phase 6에서 추가됩니다."
         };
         table.Controls.Add(phaseNotice, 0, 6);
         table.SetColumnSpan(phaseNotice, 2);
@@ -75,7 +80,7 @@ public sealed class SettingsForm : Form
     {
         try
         {
-            controller.SaveApiConfiguration(apiKeyTextBox.Text, modelTextBox.Text);
+            controller.SaveApiConfiguration(apiKeyTextBox.Text, modelComboBox.Text);
             apiKeyTextBox.Clear();
             RefreshSavedKeyLabel();
             SetStatus("API 설정을 저장했습니다.", isError: false);
@@ -92,7 +97,7 @@ public sealed class SettingsForm : Form
         SetStatus("연결을 확인하고 있습니다...", isError: false);
         try
         {
-            if (!string.Equals(modelTextBox.Text.Trim(), controller.Settings.Api.Model, StringComparison.Ordinal))
+            if (!string.Equals(modelComboBox.Text.Trim(), controller.Settings.Api.Model, StringComparison.Ordinal))
             {
                 SetStatus("연결 테스트 전에 모델 설정을 저장해 주세요.", isError: true);
                 return;

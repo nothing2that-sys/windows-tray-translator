@@ -143,6 +143,10 @@ public sealed class GeminiApiClient
             TranslationResult.Failure(TranslationFailureKind.Authentication, "Gemini API 키가 올바르지 않습니다."),
         HttpStatusCode.TooManyRequests =>
             TranslationResult.Failure(TranslationFailureKind.RateLimit, "API 호출 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."),
+        HttpStatusCode.NotFound =>
+            TranslationResult.Failure(
+                TranslationFailureKind.ModelUnavailable,
+                "설정한 Gemini 모델을 사용할 수 없습니다. 설정에서 모델명을 확인해 주세요."),
         _ when (int)statusCode >= 500 =>
             TranslationResult.Failure(TranslationFailureKind.Server, "번역 서버에서 오류가 발생했습니다."),
         _ => TranslationResult.Failure(TranslationFailureKind.InvalidRequest, "번역 요청을 처리하지 못했습니다.")

@@ -43,7 +43,9 @@ public sealed class ApplicationController : IDisposable
             keyboard,
             logger);
         activeWindow = new ActiveWindowService();
-        selectedTextProvider = new ClipboardSelectedTextProvider(clipboard, keyboard, activeWindow, logger);
+        ISelectedTextProvider clipboardProvider = new ClipboardSelectedTextProvider(clipboard, keyboard, activeWindow, logger);
+        ISelectedTextProvider uiAutomationProvider = new UiAutomationSelectedTextProvider(activeWindow, logger);
+        selectedTextProvider = new CompositeSelectedTextProvider(clipboardProvider, uiAutomationProvider, logger);
         secretStore = new DpapiSecretStore(paths.SecretFile);
         httpClient = new HttpClient();
         geminiClient = new GeminiApiClient(httpClient, logger);
@@ -62,6 +64,7 @@ public sealed class ApplicationController : IDisposable
     }
 
     public event EventHandler<UserNotificationEventArgs>? NotificationRequested;
+    public event EventHandler<TranslationPopupRequestedEventArgs>? TranslationPopupRequested;
 
     public AppPaths Paths { get; }
     public AppSettings Settings { get; }
@@ -118,9 +121,9 @@ public sealed class ApplicationController : IDisposable
             cancellationToken);
     }
 
-    private void OnHotkeyPressed(int hotkeyId) => _ = CaptureSelectedTextAsync(hotkeyId);
+    private void OnHotkeyPressed(int hotkeyId) => _ = ExecuteHotkeyAsync(hotkeyId);
 
-    private async Task CaptureSelectedTextAsync(int hotkeyId)
+    private async Task ExecuteHotkeyAsync(int hotkeyId)
     {
         if (!Settings.General.TranslationEnabled)
         {
@@ -144,16 +147,41 @@ public sealed class ApplicationController : IDisposable
 
             if (!result.IsSuccess)
             {
-                Notify(result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.", ToolTipIcon.Warning);
+                if (hotkeyId == GlobalHotkeyService.ReadHotkeyId)
+                {
+                    ShowPopup(TranslationPopupKind.Error, result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.");
+                }
+                else
+                {
+                    Notify(result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.", ToolTipIcon.Warning);
+                }
                 return;
             }
 
-            string mode = hotkeyId == GlobalHotkeyService.ReadHotkeyId ? "읽기" : "작성";
-            Notify($"{mode} 번역용 문자열 캡처 확인 완료 ({result.Text!.Length}자)\n현재 Phase 1~3 버전은 실제 번역 결과를 아직 표시하지 않습니다.", ToolTipIcon.Info);
+            if (hotkeyId == GlobalHotkeyService.ReadHotkeyId)
+            {
+                await ExecuteReadTranslationAsync(result.Text!, shutdown.Token);
+            }
+            else
+            {
+                Notify($"작성 번역용 문자열 캡처 확인 완료 ({result.Text!.Length}자)\n자동 치환은 Phase 5에서 연결됩니다.", ToolTipIcon.Info);
+            }
         }
         catch (OperationCanceledException)
         {
             logger.Information("선택 문자열 캡처가 취소되었습니다.");
+        }
+        catch (Exception ex)
+        {
+            logger.Error("번역 작업 중 예기치 않은 오류가 발생했습니다.", ex);
+            if (hotkeyId == GlobalHotkeyService.ReadHotkeyId)
+            {
+                ShowPopup(TranslationPopupKind.Error, "번역 작업 중 오류가 발생했습니다.");
+            }
+            else
+            {
+                Notify("번역 작업 중 오류가 발생했습니다.", ToolTipIcon.Error);
+            }
         }
         finally
         {
@@ -161,8 +189,33 @@ public sealed class ApplicationController : IDisposable
         }
     }
 
+    private async Task ExecuteReadTranslationAsync(string originalText, CancellationToken cancellationToken)
+    {
+        ShowPopup(TranslationPopupKind.Translating, "번역 중...");
+        TranslationResult translation = await TranslationProvider.TranslateAsync(
+            new TranslationRequest(originalText, Settings.Translation.ReadTargetLanguage),
+            cancellationToken);
+
+        if (!translation.IsSuccess)
+        {
+            logger.Warning($"읽기 번역에 실패했습니다. Kind={translation.FailureKind}, Characters={originalText.Length}");
+            ShowPopup(TranslationPopupKind.Error, translation.ErrorMessage ?? "번역에 실패했습니다.");
+            return;
+        }
+
+        logger.Information($"읽기 번역을 완료했습니다. InputCharacters={originalText.Length}, OutputCharacters={translation.TranslatedText!.Length}");
+        ShowPopup(TranslationPopupKind.Success, translation.TranslatedText!, translation.TranslatedText);
+    }
+
     private void Notify(string message, ToolTipIcon icon) =>
         NotificationRequested?.Invoke(this, new UserNotificationEventArgs(message, icon));
+
+    private void ShowPopup(TranslationPopupKind kind, string message, string? copyText = null) =>
+        TranslationPopupRequested?.Invoke(this, new TranslationPopupRequestedEventArgs(
+            kind,
+            message,
+            copyText,
+            Settings.General.PopupTimeoutMs));
 
     public void Dispose()
     {
@@ -178,4 +231,24 @@ public sealed class UserNotificationEventArgs(string message, ToolTipIcon icon) 
 {
     public string Message { get; } = message;
     public ToolTipIcon Icon { get; } = icon;
+}
+
+public enum TranslationPopupKind
+{
+    Translating,
+    Success,
+    Warning,
+    Error
+}
+
+public sealed class TranslationPopupRequestedEventArgs(
+    TranslationPopupKind kind,
+    string message,
+    string? copyText,
+    int timeoutMs) : EventArgs
+{
+    public TranslationPopupKind Kind { get; } = kind;
+    public string Message { get; } = message;
+    public string? CopyText { get; } = copyText;
+    public int TimeoutMs { get; } = timeoutMs;
 }

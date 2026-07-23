@@ -37,7 +37,7 @@ public sealed class ClipboardSelectedTextProvider : ISelectedTextProvider
             if (!await keyboard.WaitForModifiersReleasedAsync(1500, cancellationToken))
             {
                 logger.Warning($"단축키 modifier가 해제되지 않아 캡처를 취소했습니다. Process={sourceWindow.ProcessName}");
-                return SelectedTextResult.Failure("단축키를 놓은 후 다시 시도해 주세요.", sourceWindow);
+                return SelectedTextResult.Failure("단축키를 놓은 후 다시 시도해 주세요.", sourceWindow, canFallback: false);
             }
 
             for (int attempt = 1; attempt <= 2; attempt++)
@@ -45,7 +45,7 @@ public sealed class ClipboardSelectedTextProvider : ISelectedTextProvider
                 if (!activeWindow.IsStillActive(sourceWindow))
                 {
                     logger.Warning($"캡처 전에 활성 창 또는 포커스가 변경됐습니다. Process={sourceWindow.ProcessName}");
-                    return SelectedTextResult.Failure("입력 위치가 변경되어 문자열 가져오기를 취소했습니다.", sourceWindow);
+                    return SelectedTextResult.Failure("입력 위치가 변경되어 문자열 가져오기를 취소했습니다.", sourceWindow, canFallback: false);
                 }
 
                 uint baselineSequence = clipboard.GetSequenceNumber();
@@ -65,7 +65,7 @@ public sealed class ClipboardSelectedTextProvider : ISelectedTextProvider
 
                         if (text.Length > maxCharacters)
                         {
-                            return SelectedTextResult.Failure("번역 가능한 최대 문자 수를 초과했습니다.", sourceWindow);
+                            return SelectedTextResult.Failure("번역 가능한 최대 문자 수를 초과했습니다.", sourceWindow, canFallback: false);
                         }
 
                         logger.Information($"선택 문자열을 캡처했습니다. Process={sourceWindow.ProcessName}, Characters={text.Length}, Attempt={attempt}");

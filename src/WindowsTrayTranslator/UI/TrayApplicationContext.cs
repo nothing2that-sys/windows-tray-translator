@@ -12,6 +12,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon notifyIcon;
     private readonly ToolStripMenuItem enabledItem;
     private SettingsForm? settingsForm;
+    private TranslationPopupForm? translationPopup;
 
     public TrayApplicationContext(ApplicationController controller, ILogger logger)
     {
@@ -43,6 +44,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         };
         notifyIcon.DoubleClick += (_, _) => OpenSettings();
         controller.NotificationRequested += OnNotificationRequested;
+        controller.TranslationPopupRequested += OnTranslationPopupRequested;
 
         if (!string.IsNullOrWhiteSpace(controller.StartupWarning))
         {
@@ -86,13 +88,24 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     private static void ShowAbout() => MessageBox.Show(
-        ".NET 8 기반 Gemini 번역 트레이 애플리케이션\n\n현재 구현 범위: Phase 1~3",
+        ".NET 8 기반 Gemini 번역 트레이 애플리케이션\n\n현재 구현 범위: Phase 1~4",
         "Windows Tray Translator",
         MessageBoxButtons.OK,
         MessageBoxIcon.Information);
 
     private void OnNotificationRequested(object? sender, UserNotificationEventArgs e) =>
         ShowBalloon(e.Message, e.Icon);
+
+    private void OnTranslationPopupRequested(object? sender, TranslationPopupRequestedEventArgs e)
+    {
+        if (translationPopup is null || translationPopup.IsDisposed)
+        {
+            translationPopup = new TranslationPopupForm();
+            translationPopup.FormClosed += (_, _) => translationPopup = null;
+        }
+
+        translationPopup.ShowContent(e.Kind, e.Message, e.CopyText, e.TimeoutMs);
+    }
 
     private void ShowBalloon(string message, ToolTipIcon icon)
     {
@@ -105,6 +118,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void ExitApplication()
     {
         settingsForm?.Close();
+        translationPopup?.Close();
         notifyIcon.Visible = false;
         ExitThread();
     }
@@ -114,6 +128,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (disposing)
         {
             controller.NotificationRequested -= OnNotificationRequested;
+            controller.TranslationPopupRequested -= OnTranslationPopupRequested;
+            translationPopup?.Dispose();
             notifyIcon.Dispose();
         }
 

@@ -32,6 +32,7 @@ public sealed class GeminiApiClientTests
     [InlineData(HttpStatusCode.Unauthorized, TranslationFailureKind.Authentication)]
     [InlineData(HttpStatusCode.Forbidden, TranslationFailureKind.Authentication)]
     [InlineData(HttpStatusCode.TooManyRequests, TranslationFailureKind.RateLimit)]
+    [InlineData(HttpStatusCode.NotFound, TranslationFailureKind.ModelUnavailable)]
     [InlineData(HttpStatusCode.InternalServerError, TranslationFailureKind.Server)]
     [InlineData(HttpStatusCode.BadRequest, TranslationFailureKind.InvalidRequest)]
     public async Task TranslateAsync_HttpFailure_ClassifiesStatus(HttpStatusCode status, TranslationFailureKind expected)
@@ -45,6 +46,21 @@ public sealed class GeminiApiClientTests
             10, 0, CancellationToken.None);
 
         Assert.Equal(expected, result.FailureKind);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_ModelNotFound_ExplainsModelSetting()
+    {
+        GeminiApiClient client = new(
+            new HttpClient(new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))),
+            new TestLogger());
+
+        TranslationResult result = await client.TranslateAsync(
+            "secret-key", "retired-model", new TranslationRequest("Hello", "Korean"),
+            10, 0, CancellationToken.None);
+
+        Assert.Equal(TranslationFailureKind.ModelUnavailable, result.FailureKind);
+        Assert.Contains("모델", result.ErrorMessage);
     }
 
     [Fact]
