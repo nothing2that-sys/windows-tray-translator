@@ -30,6 +30,12 @@ public sealed class TranslationSettings
     public int ClipboardRetryCount { get; set; } = 5;
     public int ClipboardRetryDelayMs { get; set; } = 50;
     public bool PreferUiAutomation { get; set; }
+    public string ReadRecentTargetLanguage { get; set; } = "Korean";
+    public string ReplaceRecentTargetLanguage { get; set; } = "English";
+    public string TranslationStyle { get; set; } = "Natural";
+    public string Politeness { get; set; } = "Auto";
+    public string Glossary { get; set; } = string.Empty;
+    public string ExcludedTerms { get; set; } = string.Empty;
 }
 
 public sealed class ApiSettings
@@ -38,4 +44,6 @@ public sealed class ApiSettings
     public string Model { get; set; } = "gemini-3.5-flash-lite";
     public int RequestTimeoutSeconds { get; set; } = 30;
     public int TransientRetryCount { get; set; } = 2;
+    public bool EnableFallbackModel { get; set; }
+    public string FallbackModel { get; set; } = "gemini-3.1-flash-lite";
 }

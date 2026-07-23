@@ -24,6 +24,12 @@ public static class SettingsValidator
 
         settings.Translation.ReadTargetLanguage = ValidSelectableTargetLanguage(settings.Translation.ReadTargetLanguage, "Korean");
         settings.Translation.ReplaceTargetLanguage = ValidReplaceTargetLanguage(settings.Translation.ReplaceTargetLanguage);
+        settings.Translation.ReadRecentTargetLanguage = NonEmpty(settings.Translation.ReadRecentTargetLanguage, "Korean");
+        settings.Translation.ReplaceRecentTargetLanguage = NonEmpty(settings.Translation.ReplaceRecentTargetLanguage, "English");
+        settings.Translation.TranslationStyle = ValidChoice(settings.Translation.TranslationStyle, "Natural", "Natural", "Literal", "Business");
+        settings.Translation.Politeness = ValidChoice(settings.Translation.Politeness, "Auto", "Auto", "Formal", "Casual");
+        settings.Translation.Glossary = LimitLength(settings.Translation.Glossary, 4000);
+        settings.Translation.ExcludedTerms = LimitLength(settings.Translation.ExcludedTerms, 2000);
         settings.Translation.ReplaceFormat = ValidReplaceFormatOrDefault(settings.Translation.ReplaceFormat);
         settings.Translation.ReadHotkey = NonEmpty(settings.Translation.ReadHotkey, "Alt+R");
         settings.Translation.ReplaceHotkey = NonEmpty(settings.Translation.ReplaceHotkey, "Alt+T");
@@ -36,6 +42,7 @@ public static class SettingsValidator
         }
         settings.Api.Provider = "Gemini";
         settings.Api.Model = NonEmpty(settings.Api.Model, "gemini-3.5-flash-lite");
+        settings.Api.FallbackModel = NonEmpty(settings.Api.FallbackModel, "gemini-3.1-flash-lite");
         return settings;
     }
 
@@ -72,4 +79,13 @@ public static class SettingsValidator
             ? "Select"
             : normalized;
     }
+
+    private static string ValidChoice(string? value, string fallback, params string[] allowed)
+    {
+        string normalized = NonEmpty(value, fallback);
+        return allowed.FirstOrDefault(item => string.Equals(item, normalized, StringComparison.OrdinalIgnoreCase)) ?? fallback;
+    }
+
+    private static string LimitLength(string? value, int maximum) =>
+        string.IsNullOrEmpty(value) ? string.Empty : value[..Math.Min(value.Length, maximum)];
 }

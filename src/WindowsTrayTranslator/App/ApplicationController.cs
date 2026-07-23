@@ -18,6 +18,7 @@ public sealed class ApplicationController : IDisposable
     private readonly KeyboardInputService keyboard;
     private readonly ClipboardService clipboard;
     private readonly ActiveWindowService activeWindow;
+    private readonly InputAccessService inputAccess;
     private readonly ISelectedTextProvider clipboardFirstTextProvider;
     private readonly ISelectedTextProvider uiAutomationFirstTextProvider;
     private readonly GlobalHotkeyService hotkeys;
@@ -46,6 +47,7 @@ public sealed class ApplicationController : IDisposable
             keyboard,
             logger);
         activeWindow = new ActiveWindowService();
+        inputAccess = new InputAccessService();
         ISelectedTextProvider clipboardProvider = new ClipboardSelectedTextProvider(clipboard, keyboard, activeWindow, logger);
         ISelectedTextProvider uiAutomationProvider = new UiAutomationSelectedTextProvider(activeWindow, logger);
         clipboardFirstTextProvider = new CompositeSelectedTextProvider(clipboardProvider, uiAutomationProvider, logger);
@@ -103,10 +105,7 @@ public sealed class ApplicationController : IDisposable
 
     public void SaveApiConfiguration(string? newApiKey, string model)
     {
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            throw new ArgumentException("Gemini 모델명을 입력해 주세요.", nameof(model));
-        }
+        GeminiModelPolicy.EnsureUsable(model);
 
         if (!string.IsNullOrWhiteSpace(newApiKey))
         {
@@ -120,6 +119,15 @@ public sealed class ApplicationController : IDisposable
 
     public void ApplySettings(AppSettings candidate, string? newApiKey)
     {
+        GeminiModelPolicy.EnsureUsable(candidate.Api.Model);
+        if (candidate.Api.EnableFallbackModel)
+        {
+            GeminiModelPolicy.EnsureUsable(candidate.Api.FallbackModel);
+            if (string.Equals(candidate.Api.Model, candidate.Api.FallbackModel, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("기본 모델과 보조 모델은 서로 달라야 합니다.");
+            }
+        }
         HotkeyDefinition read = HotkeyDefinition.Parse(candidate.Translation.ReadHotkey);
         HotkeyDefinition replace = HotkeyDefinition.Parse(candidate.Translation.ReplaceHotkey);
         if (read == replace)
@@ -185,6 +193,15 @@ public sealed class ApplicationController : IDisposable
         int timeoutSeconds,
         CancellationToken cancellationToken)
     {
+        try
+        {
+            GeminiModelPolicy.EnsureUsable(model);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return TranslationResult.Failure(TranslationFailureKind.ModelUnavailable, ex.Message);
+        }
+
         string? apiKey = string.IsNullOrWhiteSpace(unsavedApiKey)
             ? secretStore.ReadSecret(SecretNames.GeminiApiKey)
             : unsavedApiKey.Trim();
@@ -201,6 +218,17 @@ public sealed class ApplicationController : IDisposable
             timeoutSeconds,
             Settings.Api.TransientRetryCount,
             cancellationToken);
+    }
+
+    public async Task<GeminiModelListResult> ListModelsAsync(
+        string? unsavedApiKey,
+        int timeoutSeconds,
+        CancellationToken cancellationToken)
+    {
+        string? apiKey = string.IsNullOrWhiteSpace(unsavedApiKey)
+            ? secretStore.ReadSecret(SecretNames.GeminiApiKey)
+            : unsavedApiKey.Trim();
+        return await geminiClient.ListModelsAsync(apiKey ?? string.Empty, timeoutSeconds, cancellationToken);
     }
 
     private void OnHotkeyPressed(int hotkeyId) => _ = ExecuteHotkeyAsync(hotkeyId);
@@ -221,10 +249,19 @@ public sealed class ApplicationController : IDisposable
         try
         {
             WindowIdentity sourceWindow = activeWindow.Capture();
+            InputAccessResult access = inputAccess.Check(sourceWindow);
+            if (!access.IsAllowed)
+            {
+                ShowPopup(TranslationPopupKind.Error, access.ErrorMessage!);
+                return;
+            }
             string configuredTargetLanguage = hotkeyId == GlobalHotkeyService.ReadHotkeyId
                 ? Settings.Translation.ReadTargetLanguage
                 : Settings.Translation.ReplaceTargetLanguage;
-            string? targetLanguage = await ResolveTargetLanguageAsync(configuredTargetLanguage, shutdown.Token);
+            string? targetLanguage = await ResolveTargetLanguageAsync(
+                configuredTargetLanguage,
+                hotkeyId == GlobalHotkeyService.ReadHotkeyId,
+                shutdown.Token);
             if (targetLanguage is null)
             {
                 return;
@@ -399,6 +436,7 @@ public sealed class ApplicationController : IDisposable
 
     private async Task<string?> ResolveTargetLanguageAsync(
         string configuredTargetLanguage,
+        bool isReadTranslation,
         CancellationToken cancellationToken)
     {
         if (!string.Equals(configuredTargetLanguage, "Select", StringComparison.OrdinalIgnoreCase))
@@ -406,7 +444,10 @@ public sealed class ApplicationController : IDisposable
             return configuredTargetLanguage;
         }
 
-        LanguageSelectionRequestedEventArgs request = new();
+        string recentLanguage = isReadTranslation
+            ? Settings.Translation.ReadRecentTargetLanguage
+            : Settings.Translation.ReplaceRecentTargetLanguage;
+        LanguageSelectionRequestedEventArgs request = new(isReadTranslation, recentLanguage);
         LanguageSelectionRequested?.Invoke(this, request);
         if (!request.WasHandled)
         {
@@ -414,7 +455,22 @@ public sealed class ApplicationController : IDisposable
             return null;
         }
 
-        return await request.Selection.WaitAsync(cancellationToken);
+        string? selected = await request.Selection.WaitAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(selected))
+        {
+            if (isReadTranslation)
+            {
+                Settings.Translation.ReadRecentTargetLanguage = selected;
+            }
+            else
+            {
+                Settings.Translation.ReplaceRecentTargetLanguage = selected;
+            }
+
+            configuration.Save(Settings);
+        }
+
+        return selected;
     }
 
     private void TryRollbackSettings(
@@ -472,11 +528,19 @@ public sealed class ApplicationController : IDisposable
         target.Translation.ClipboardRetryCount = source.Translation.ClipboardRetryCount;
         target.Translation.ClipboardRetryDelayMs = source.Translation.ClipboardRetryDelayMs;
         target.Translation.PreferUiAutomation = source.Translation.PreferUiAutomation;
+        target.Translation.ReadRecentTargetLanguage = source.Translation.ReadRecentTargetLanguage;
+        target.Translation.ReplaceRecentTargetLanguage = source.Translation.ReplaceRecentTargetLanguage;
+        target.Translation.TranslationStyle = source.Translation.TranslationStyle;
+        target.Translation.Politeness = source.Translation.Politeness;
+        target.Translation.Glossary = source.Translation.Glossary;
+        target.Translation.ExcludedTerms = source.Translation.ExcludedTerms;
 
         target.Api.Provider = source.Api.Provider;
         target.Api.Model = source.Api.Model;
         target.Api.RequestTimeoutSeconds = source.Api.RequestTimeoutSeconds;
         target.Api.TransientRetryCount = source.Api.TransientRetryCount;
+        target.Api.EnableFallbackModel = source.Api.EnableFallbackModel;
+        target.Api.FallbackModel = source.Api.FallbackModel;
     }
 
     private void Notify(string message, ToolTipIcon icon) =>
@@ -525,13 +589,15 @@ public sealed class TranslationPopupRequestedEventArgs(
     public int TimeoutMs { get; } = timeoutMs;
 }
 
-public sealed class LanguageSelectionRequestedEventArgs : EventArgs
+public sealed class LanguageSelectionRequestedEventArgs(bool isReadTranslation = true, string recentLanguage = "Korean") : EventArgs
 {
     private readonly TaskCompletionSource<string?> completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public Task<string?> Selection => completion.Task;
     public bool WasHandled { get; private set; }
+    public bool IsReadTranslation { get; } = isReadTranslation;
+    public string RecentLanguage { get; } = recentLanguage;
 
     public void MarkHandled() => WasHandled = true;
     public void Complete(string? language) => completion.TrySetResult(language);

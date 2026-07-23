@@ -66,7 +66,7 @@ public sealed class GeminiApiClient
                     return GeminiResponseParser.Parse(body);
                 }
 
-                TranslationResult failure = MapStatusCode(response.StatusCode);
+                TranslationResult failure = MapStatusCode(response, body);
                 if (attempt < transientRetryCount && IsTransient(response.StatusCode))
                 {
                     await Task.Delay(TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt)), timeout.Token);
@@ -108,13 +108,70 @@ public sealed class GeminiApiClient
         return TranslationResult.Failure(TranslationFailureKind.Network, "네트워크 연결을 확인해 주세요.");
     }
 
+    public async Task<GeminiModelListResult> ListModelsAsync(
+        string apiKey,
+        int timeoutSeconds,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return GeminiModelListResult.Failure("Gemini API 키를 설정해 주세요.");
+        }
+
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        try
+        {
+            using HttpRequestMessage message = new(HttpMethod.Get,
+                "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000");
+            message.Headers.Add("x-goog-api-key", apiKey);
+            using HttpResponseMessage response = await httpClient.SendAsync(message, timeout.Token);
+            string body = await response.Content.ReadAsStringAsync(timeout.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                return GeminiModelListResult.Failure(MapStatusCode(response, body).ErrorMessage!);
+            }
+
+            using JsonDocument document = JsonDocument.Parse(body);
+            List<string> models = [];
+            if (document.RootElement.TryGetProperty("models", out JsonElement modelArray))
+            {
+                foreach (JsonElement model in modelArray.EnumerateArray())
+                {
+                    bool supportsGenerateContent = model.TryGetProperty("supportedGenerationMethods", out JsonElement methods) &&
+                        methods.EnumerateArray().Any(method => method.GetString() == "generateContent");
+                    string? name = model.TryGetProperty("baseModelId", out JsonElement baseId)
+                        ? baseId.GetString()
+                        : model.GetProperty("name").GetString()?.Replace("models/", string.Empty, StringComparison.Ordinal);
+                    if (supportsGenerateContent && !string.IsNullOrWhiteSpace(name) && !GeminiModelPolicy.IsKnownRetired(name))
+                    {
+                        models.Add(name);
+                    }
+                }
+            }
+            return GeminiModelListResult.Success(models.Distinct(StringComparer.OrdinalIgnoreCase).Order().ToArray());
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return GeminiModelListResult.Failure("모델 목록 요청 시간이 초과되었습니다.");
+        }
+        catch (HttpRequestException)
+        {
+            return GeminiModelListResult.Failure("네트워크 연결을 확인해 주세요.");
+        }
+        catch (JsonException)
+        {
+            return GeminiModelListResult.Failure("모델 목록 응답을 해석하지 못했습니다.");
+        }
+    }
+
     private static string SerializeRequest(TranslationRequest request)
     {
         GeminiGenerateRequest payload = new()
         {
             SystemInstruction = new GeminiContent
             {
-                Parts = [new GeminiPart { Text = SystemPrompt }]
+                Parts = [new GeminiPart { Text = BuildSystemPrompt(request.Preferences) }]
             },
             Contents =
             [
@@ -142,21 +199,91 @@ public sealed class GeminiApiClient
             : $"Translate to {normalized}.";
     }
 
+    internal static string BuildSystemPrompt(TranslationPreferences? preferences)
+    {
+        if (preferences is null)
+        {
+            return SystemPrompt;
+        }
+
+        StringBuilder prompt = new(SystemPrompt);
+        prompt.AppendLine().AppendLine("User translation preferences:");
+        prompt.AppendLine(preferences.Style switch
+        {
+            "Literal" => "Prefer a faithful, literal translation while remaining grammatical.",
+            "Business" => "Use concise, professional business language.",
+            _ => "Prefer natural phrasing used by native speakers."
+        });
+        prompt.AppendLine(preferences.Politeness switch
+        {
+            "Formal" => "Use formal and polite language.",
+            "Casual" => "Use friendly, casual language.",
+            _ => "Preserve the source text's level of politeness."
+        });
+        if (!string.IsNullOrWhiteSpace(preferences.Glossary))
+        {
+            prompt.AppendLine("Apply this user glossary (one mapping per line):")
+                .AppendLine(preferences.Glossary.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(preferences.ExcludedTerms))
+        {
+            prompt.AppendLine("Keep these terms exactly unchanged:")
+                .AppendLine(preferences.ExcludedTerms.Trim());
+        }
+        return prompt.ToString();
+    }
+
     private static bool IsTransient(HttpStatusCode statusCode) =>
         statusCode == HttpStatusCode.TooManyRequests || (int)statusCode >= 500;
 
-    private static TranslationResult MapStatusCode(HttpStatusCode statusCode) => statusCode switch
+    private static TranslationResult MapStatusCode(HttpResponseMessage response, string body) => response.StatusCode switch
     {
         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
             TranslationResult.Failure(TranslationFailureKind.Authentication, "Gemini API 키가 올바르지 않습니다."),
         HttpStatusCode.TooManyRequests =>
-            TranslationResult.Failure(TranslationFailureKind.RateLimit, "API 호출 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."),
+            TranslationResult.Failure(TranslationFailureKind.RateLimit, BuildRateLimitMessage(response, body)),
         HttpStatusCode.NotFound =>
             TranslationResult.Failure(
                 TranslationFailureKind.ModelUnavailable,
                 "설정한 Gemini 모델을 사용할 수 없습니다. 설정에서 모델명을 확인해 주세요."),
-        _ when (int)statusCode >= 500 =>
+        _ when (int)response.StatusCode >= 500 =>
             TranslationResult.Failure(TranslationFailureKind.Server, "번역 서버에서 오류가 발생했습니다."),
         _ => TranslationResult.Failure(TranslationFailureKind.InvalidRequest, "번역 요청을 처리하지 못했습니다.")
     };
+
+    private static string BuildRateLimitMessage(HttpResponseMessage response, string body)
+    {
+        TimeSpan? delay = response.Headers.RetryAfter?.Delta;
+        if (delay is null)
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(body);
+                if (document.RootElement.TryGetProperty("error", out JsonElement error) &&
+                    error.TryGetProperty("details", out JsonElement details))
+                {
+                    foreach (JsonElement detail in details.EnumerateArray())
+                    {
+                        if (detail.TryGetProperty("retryDelay", out JsonElement retryDelay))
+                        {
+                            string value = retryDelay.GetString() ?? string.Empty;
+                            if (double.TryParse(value.TrimEnd('s'), System.Globalization.CultureInfo.InvariantCulture, out double seconds))
+                            {
+                                delay = TimeSpan.FromSeconds(seconds);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // Fall back to the generic rate-limit message.
+            }
+        }
+
+        return delay is { } retry
+            ? $"API 호출 한도를 초과했습니다. 약 {Math.Max(1, (int)Math.Ceiling(retry.TotalSeconds))}초 후 다시 시도해 주세요."
+            : "API 호출 한도를 초과했습니다. 사용량과 요금제를 확인하거나 잠시 후 다시 시도해 주세요.";
+    }
 }

@@ -85,6 +85,40 @@ public sealed class GeminiApiClientTests
         Assert.Equal(2, calls);
     }
 
+    [Fact]
+    public async Task TranslateAsync_RateLimitWithRetryAfter_ShowsWaitTime()
+    {
+        HttpResponseMessage response = new(HttpStatusCode.TooManyRequests);
+        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(12));
+        GeminiApiClient client = new(new HttpClient(new RecordingHandler(_ => response)), new TestLogger());
+
+        TranslationResult result = await client.TranslateAsync(
+            "key", "model", new TranslationRequest("Hello", "Korean"), 10, 0, CancellationToken.None);
+
+        Assert.Contains("12초", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_ReturnsOnlyGenerateContentModelsAndFiltersRetiredModels()
+    {
+        const string json = """
+            {"models":[
+              {"baseModelId":"gemini-3.5-flash-lite","supportedGenerationMethods":["generateContent"]},
+              {"baseModelId":"gemini-embedding-2","supportedGenerationMethods":["embedContent"]},
+              {"baseModelId":"gemini-2.0-flash","supportedGenerationMethods":["generateContent"]}
+            ]}
+            """;
+        GeminiApiClient client = new(new HttpClient(new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json)
+        })), new TestLogger());
+
+        GeminiModelListResult result = await client.ListModelsAsync("key", 10, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(["gemini-3.5-flash-lite"], result.Models);
+    }
+
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
     {
         public HttpRequestMessage? LastRequest { get; private set; }

@@ -1,6 +1,7 @@
 using WindowsTrayTranslator.App;
 using WindowsTrayTranslator.Configuration;
 using WindowsTrayTranslator.Translation;
+using WindowsTrayTranslator.Translation.Gemini;
 
 namespace WindowsTrayTranslator.UI;
 
@@ -27,6 +28,10 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown retryCountNumeric = CreateNumeric(1, 20);
     private readonly NumericUpDown retryDelayNumeric = CreateNumeric(10, 1000, 10);
     private readonly CheckBox clipboardFirstCheckBox = new() { Text = "Ctrl+C 방식 우선 사용", AutoSize = true };
+    private readonly ComboBox styleCombo = CreateDropDownList("Natural", "Literal", "Business");
+    private readonly ComboBox politenessCombo = CreateDropDownList("Auto", "Formal", "Casual");
+    private readonly TextBox glossaryTextBox = new() { Dock = DockStyle.Fill, Multiline = true, Height = 70, ScrollBars = ScrollBars.Vertical };
+    private readonly TextBox excludedTermsTextBox = new() { Dock = DockStyle.Fill, Multiline = true, Height = 55, ScrollBars = ScrollBars.Vertical };
 
     private readonly TextBox apiKeyTextBox = new() { UseSystemPasswordChar = true, Dock = DockStyle.Fill };
     private readonly ComboBox modelComboBox = CreateEditableCombo(
@@ -39,6 +44,9 @@ public sealed class SettingsForm : Form
     private readonly Label savedKeyLabel = new() { AutoSize = true };
     private readonly Label statusLabel = new() { AutoSize = true, MaximumSize = new Size(620, 0) };
     private readonly Button testButton = new() { Text = "API 연결 테스트", AutoSize = true };
+    private readonly Button refreshModelsButton = new() { Text = "모델 목록 새로고침", AutoSize = true };
+    private readonly CheckBox fallbackModelCheckBox = new() { Text = "기본 모델 실패 시 보조 모델 사용", AutoSize = true };
+    private readonly ComboBox fallbackModelComboBox = CreateEditableCombo("gemini-3.1-flash-lite", "gemini-3.5-flash-lite");
 
     public SettingsForm(ApplicationController controller)
     {
@@ -59,6 +67,8 @@ public sealed class SettingsForm : Form
             new ReplaceFormatOption("줄바꿈 병기 — Hello. 다음 줄에 (안녕하세요.)", ReplaceOutputFormat.TranslationAndOriginalOnNewLine)
         ]);
         replaceFormatCombo.SelectedIndexChanged += (_, _) => UpdateReplaceFormatPreview();
+        fallbackModelCheckBox.CheckedChanged += (_, _) =>
+            fallbackModelComboBox.Enabled = fallbackModelCheckBox.Checked;
 
         TabControl tabs = new() { Dock = DockStyle.Fill };
         tabs.TabPages.Add(CreateGeneralTab());
@@ -134,6 +144,14 @@ public sealed class SettingsForm : Form
         AddRow(table, "클립보드 재시도 횟수", retryCountNumeric);
         AddRow(table, "클립보드 재시도 간격 (ms)", retryDelayNumeric);
         AddFullRow(table, clipboardFirstCheckBox);
+        AddRow(table, "번역 방식", styleCombo);
+        AddFullRow(table, new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "Natural: 자연스럽게 / Literal: 직역 중심 / Business: 비즈니스 문체" });
+        AddRow(table, "말투", politenessCombo);
+        AddFullRow(table, new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "Auto: 원문 유지 / Formal: 존댓말·격식 / Casual: 친근한 말투" });
+        AddRow(table, "사용자 용어집", glossaryTextBox);
+        AddFullRow(table, new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "한 줄에 하나씩 입력하세요. 예: fixture=지그" });
+        AddRow(table, "번역 제외 단어", excludedTermsTextBox);
+        AddFullRow(table, new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "쉼표 또는 줄바꿈으로 구분합니다. 입력한 용어는 그대로 유지합니다." });
         AddFullRow(table, new Label
         {
             AutoSize = true,
@@ -150,12 +168,16 @@ public sealed class SettingsForm : Form
         AddRow(table, "API 키", apiKeyTextBox);
         AddRow(table, "저장 상태", savedKeyLabel);
         AddRow(table, "모델", modelComboBox);
+        AddFullRow(table, refreshModelsButton);
+        AddFullRow(table, fallbackModelCheckBox);
+        AddRow(table, "보조 모델", fallbackModelComboBox);
         AddRow(table, "요청 제한 시간 (초)", requestTimeoutNumeric);
         AddRow(table, "일시 오류 재시도", transientRetryNumeric);
 
         FlowLayoutPanel apiActions = new() { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
         Button deleteButton = new() { Text = "저장된 API 키 삭제", AutoSize = true };
         testButton.Click += TestConnectionAsync;
+        refreshModelsButton.Click += RefreshModelsAsync;
         deleteButton.Click += (_, _) => DeleteApiKey();
         apiActions.Controls.Add(testButton);
         apiActions.Controls.Add(deleteButton);
@@ -189,10 +211,17 @@ public sealed class SettingsForm : Form
         retryCountNumeric.Value = settings.Translation.ClipboardRetryCount;
         retryDelayNumeric.Value = settings.Translation.ClipboardRetryDelayMs;
         clipboardFirstCheckBox.Checked = !settings.Translation.PreferUiAutomation;
+        styleCombo.SelectedItem = settings.Translation.TranslationStyle;
+        politenessCombo.SelectedItem = settings.Translation.Politeness;
+        glossaryTextBox.Text = settings.Translation.Glossary;
+        excludedTermsTextBox.Text = settings.Translation.ExcludedTerms;
 
         modelComboBox.Text = settings.Api.Model;
         requestTimeoutNumeric.Value = settings.Api.RequestTimeoutSeconds;
         transientRetryNumeric.Value = settings.Api.TransientRetryCount;
+        fallbackModelCheckBox.Checked = settings.Api.EnableFallbackModel;
+        fallbackModelComboBox.Text = settings.Api.FallbackModel;
+        fallbackModelComboBox.Enabled = fallbackModelCheckBox.Checked;
         RefreshSavedKeyLabel();
     }
 
@@ -237,14 +266,20 @@ public sealed class SettingsForm : Form
             ClipboardRestoreDelayMs = (int)restoreDelayNumeric.Value,
             ClipboardRetryCount = (int)retryCountNumeric.Value,
             ClipboardRetryDelayMs = (int)retryDelayNumeric.Value,
-            PreferUiAutomation = !clipboardFirstCheckBox.Checked
+            PreferUiAutomation = !clipboardFirstCheckBox.Checked,
+            TranslationStyle = styleCombo.SelectedItem?.ToString() ?? "Natural",
+            Politeness = politenessCombo.SelectedItem?.ToString() ?? "Auto",
+            Glossary = glossaryTextBox.Text,
+            ExcludedTerms = excludedTermsTextBox.Text
         },
         Api = new ApiSettings
         {
             Provider = "Gemini",
             Model = modelComboBox.Text,
             RequestTimeoutSeconds = (int)requestTimeoutNumeric.Value,
-            TransientRetryCount = (int)transientRetryNumeric.Value
+            TransientRetryCount = (int)transientRetryNumeric.Value,
+            EnableFallbackModel = fallbackModelCheckBox.Checked,
+            FallbackModel = fallbackModelComboBox.Text
         }
     };
 
@@ -268,6 +303,42 @@ public sealed class SettingsForm : Form
         finally
         {
             testButton.Enabled = true;
+        }
+    }
+
+    private async void RefreshModelsAsync(object? sender, EventArgs e)
+    {
+        refreshModelsButton.Enabled = false;
+        SetStatus("사용 가능한 Gemini 모델을 확인하고 있습니다...", isError: false);
+        try
+        {
+            GeminiModelListResult result = await controller.ListModelsAsync(
+                apiKeyTextBox.Text,
+                (int)requestTimeoutNumeric.Value,
+                CancellationToken.None);
+            if (!result.IsSuccess)
+            {
+                SetStatus(result.ErrorMessage!, isError: true);
+                return;
+            }
+
+            string current = modelComboBox.Text;
+            string fallback = fallbackModelComboBox.Text;
+            modelComboBox.Items.Clear();
+            fallbackModelComboBox.Items.Clear();
+            modelComboBox.Items.AddRange(result.Models.Cast<object>().ToArray());
+            fallbackModelComboBox.Items.AddRange(result.Models.Cast<object>().ToArray());
+            modelComboBox.Text = current;
+            fallbackModelComboBox.Text = fallback;
+            SetStatus($"번역 가능한 모델 {result.Models.Count}개를 불러왔습니다.", isError: false);
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, isError: true);
+        }
+        finally
+        {
+            refreshModelsButton.Enabled = true;
         }
     }
 
@@ -354,6 +425,14 @@ public sealed class SettingsForm : Form
     {
         ComboBox combo = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDown };
         combo.Items.AddRange(items);
+        return combo;
+    }
+
+    private static ComboBox CreateDropDownList(params string[] items)
+    {
+        ComboBox combo = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+        combo.Items.AddRange(items);
+        combo.SelectedIndex = 0;
         return combo;
     }
 
