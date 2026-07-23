@@ -2,6 +2,8 @@
 
 .NET 8 WinForms 기반의 Windows 트레이 상주형 Gemini 번역 애플리케이션입니다.
 
+처음 사용하는 경우 UI 화면과 단계별 설명을 포함한 [사용자 매뉴얼](doc/WindowsTrayTranslator_UserManual.html)을 참고하세요.
+
 Phase 1~7 구현을 완료했습니다. 트레이 실행, 번역과 안전한 자동 치환, 통합 설정 UI, 단축키 즉시 재등록, Windows 시작 프로그램 등록, self-contained 단일 파일 배포를 제공합니다.
 
 ## 요구 환경
@@ -61,7 +63,7 @@ API 탭의 `모델 목록 새로고침`은 현재 API 키에서 `generateContent
 3. `API` 탭에 키와 모델명을 입력합니다. 번역용 기본 모델은 `gemini-3.5-flash-lite`입니다.
 4. `API 연결 테스트`로 확인한 뒤 `저장`을 누릅니다.
 
-API 키는 설정 JSON에 저장되지 않습니다. `%LOCALAPPDATA%\WindowsTrayTranslator\secrets.dat`에 Windows DPAPI CurrentUser 범위로 암호화하여 저장합니다. 선택 문자열과 번역 결과는 로그에 기록하지 않습니다.
+API 키는 설정 JSON에 저장되지 않습니다. `%LOCALAPPDATA%\WindowsTrayTranslator\secrets.dat`에 Windows DPAPI CurrentUser 범위로 암호화하여 저장합니다. 일반 운영 로그에는 선택 문자열과 번역 결과를 기록하지 않지만, 로그 기록이 활성화된 경우 번역 히스토리 기능을 위해 원문과 번역문을 `logs\history-날짜.jsonl`에 저장합니다.
 
 선택 문자열은 Gemini API로 전송됩니다. 회사 기밀, 개인정보 또는 전송이 금지된 내용을 번역하지 마십시오.
 
