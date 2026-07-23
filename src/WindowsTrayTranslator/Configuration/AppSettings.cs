@@ -12,7 +12,10 @@ public sealed class GeneralSettings
     public bool TranslationEnabled { get; set; } = true;
     public bool RunAtWindowsStartup { get; set; }
     public bool ShowTranslatingPopup { get; set; } = true;
+    // Legacy shared timeout retained so older configuration files can seed both new values.
     public int PopupTimeoutMs { get; set; } = 5000;
+    public int ReadPopupTimeoutMs { get; set; } = -1;
+    public int ReplacePopupTimeoutMs { get; set; } = -1;
     public bool EnableLogging { get; set; } = true;
     public int LogRetentionDays { get; set; } = 14;
 }
@@ -34,6 +37,7 @@ public sealed class TranslationSettings
     public string ReplaceRecentTargetLanguage { get; set; } = "English";
     public string TranslationStyle { get; set; } = "Natural";
     public string Politeness { get; set; } = "Auto";
+    public string CustomInstructions { get; set; } = string.Empty;
     public string Glossary { get; set; } = string.Empty;
     public string ExcludedTerms { get; set; } = string.Empty;
 }

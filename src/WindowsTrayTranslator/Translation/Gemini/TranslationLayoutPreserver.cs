@@ -67,20 +67,20 @@ internal sealed class TranslationLayoutPreserver
         restored = false;
         if (!UsesMarkers)
         {
-            return translatedText;
+            return SanitizeOutput(translatedText);
         }
 
         MatchCollection matches = MarkerPattern.Matches(translatedText);
         if (matches.Count != originalLines.Length)
         {
-            return translatedText;
+            return SanitizeOutput(translatedText);
         }
 
         for (int index = 0; index < matches.Count; index++)
         {
             if (!int.TryParse(matches[index].Groups[1].Value, out int lineNumber) || lineNumber != index + 1)
             {
-                return translatedText;
+                return SanitizeOutput(translatedText);
             }
         }
 
@@ -122,5 +122,16 @@ internal sealed class TranslationLayoutPreserver
 
         restored = true;
         return result.ToString();
+    }
+
+    internal static string SanitizeOutput(string translatedText)
+    {
+        if (!MarkerPattern.IsMatch(translatedText))
+        {
+            return translatedText;
+        }
+
+        string withoutMarkers = MarkerPattern.Replace(translatedText, string.Empty);
+        return Regex.Replace(withoutMarkers, "(?m)^[ \t]+", string.Empty).Trim();
     }
 }

@@ -13,6 +13,12 @@ public static class SettingsValidator
         settings.Api ??= new ApiSettings();
 
         settings.General.PopupTimeoutMs = Math.Clamp(settings.General.PopupTimeoutMs, 1000, 60000);
+        settings.General.ReadPopupTimeoutMs = settings.General.ReadPopupTimeoutMs == -1
+            ? settings.General.PopupTimeoutMs
+            : Math.Clamp(settings.General.ReadPopupTimeoutMs, 1000, 60000);
+        settings.General.ReplacePopupTimeoutMs = settings.General.ReplacePopupTimeoutMs == -1
+            ? settings.General.PopupTimeoutMs
+            : Math.Clamp(settings.General.ReplacePopupTimeoutMs, 1000, 60000);
         settings.General.LogRetentionDays = Math.Clamp(settings.General.LogRetentionDays, 1, 365);
         settings.Translation.MaxInputCharacters = Math.Clamp(settings.Translation.MaxInputCharacters, 1, 100000);
         settings.Translation.ClipboardCopyTimeoutMs = Math.Clamp(settings.Translation.ClipboardCopyTimeoutMs, 100, 10000);
@@ -22,12 +28,13 @@ public static class SettingsValidator
         settings.Api.RequestTimeoutSeconds = Math.Clamp(settings.Api.RequestTimeoutSeconds, 5, 120);
         settings.Api.TransientRetryCount = Math.Clamp(settings.Api.TransientRetryCount, 0, 5);
 
-        settings.Translation.ReadTargetLanguage = ValidSelectableTargetLanguage(settings.Translation.ReadTargetLanguage, "Korean");
+        settings.Translation.ReadTargetLanguage = ValidReadTargetLanguage(settings.Translation.ReadTargetLanguage);
         settings.Translation.ReplaceTargetLanguage = ValidReplaceTargetLanguage(settings.Translation.ReplaceTargetLanguage);
         settings.Translation.ReadRecentTargetLanguage = NonEmpty(settings.Translation.ReadRecentTargetLanguage, "Korean");
         settings.Translation.ReplaceRecentTargetLanguage = NonEmpty(settings.Translation.ReplaceRecentTargetLanguage, "English");
         settings.Translation.TranslationStyle = ValidChoice(settings.Translation.TranslationStyle, "Natural", "Natural", "Literal", "Business");
         settings.Translation.Politeness = ValidChoice(settings.Translation.Politeness, "Auto", "Auto", "Formal", "Casual");
+        settings.Translation.CustomInstructions = LimitLength(settings.Translation.CustomInstructions, 4000);
         settings.Translation.Glossary = LimitLength(settings.Translation.Glossary, 4000);
         settings.Translation.ExcludedTerms = LimitLength(settings.Translation.ExcludedTerms, 2000);
         settings.Translation.ReplaceFormat = ValidReplaceFormatOrDefault(settings.Translation.ReplaceFormat);
@@ -70,6 +77,14 @@ public static class SettingsValidator
     private static string ValidReplaceTargetLanguage(string? value)
     {
         return ValidSelectableTargetLanguage(value, "English");
+    }
+
+    private static string ValidReadTargetLanguage(string? value)
+    {
+        string normalized = NonEmpty(value, "Korean");
+        return string.Equals(normalized, "Auto", StringComparison.OrdinalIgnoreCase)
+            ? "Auto"
+            : normalized;
     }
 
     private static string ValidSelectableTargetLanguage(string? value, string fallback)

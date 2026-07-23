@@ -1,5 +1,6 @@
 using WindowsTrayTranslator.Clipboard;
 using WindowsTrayTranslator.Configuration;
+using WindowsTrayTranslator.History;
 using WindowsTrayTranslator.Hotkeys;
 using WindowsTrayTranslator.Logging;
 using WindowsTrayTranslator.Security;
@@ -26,6 +27,7 @@ public sealed class ApplicationController : IDisposable
     private readonly HttpClient httpClient;
     private readonly GeminiApiClient geminiClient;
     private readonly StartupRegistrationService startupRegistration;
+    private readonly TranslationHistoryStore historyStore;
     private readonly SemaphoreSlim operationGate = new(1, 1);
     private readonly CancellationTokenSource shutdown = new();
 
@@ -57,6 +59,11 @@ public sealed class ApplicationController : IDisposable
         geminiClient = new GeminiApiClient(httpClient, logger);
         startupRegistration = new StartupRegistrationService(
             Environment.ProcessPath ?? Application.ExecutablePath);
+        historyStore = new TranslationHistoryStore(
+            paths.LogDirectory,
+            settings.General.EnableLogging,
+            settings.General.LogRetentionDays,
+            logger);
         TranslationProvider = new GeminiTranslationProvider(geminiClient, secretStore, () => Settings);
 
         hotkeys = new GlobalHotkeyService(OnHotkeyPressed, logger);
@@ -75,12 +82,14 @@ public sealed class ApplicationController : IDisposable
     public event EventHandler<TranslationPopupRequestedEventArgs>? TranslationPopupRequested;
     public event EventHandler<LanguageSelectionRequestedEventArgs>? LanguageSelectionRequested;
     public event EventHandler? SettingsApplied;
+    public event EventHandler? TranslationHistoryChanged;
 
     public AppPaths Paths { get; }
     public AppSettings Settings { get; }
     public ITranslationProvider TranslationProvider { get; }
     public string? StartupWarning { get; }
     public bool HasApiKey => secretStore.HasSecret(SecretNames.GeminiApiKey);
+    public IReadOnlyList<TranslationHistoryEntry> LoadTranslationHistory() => historyStore.LoadRecent();
     public bool IsStartupEnabled
     {
         get
@@ -159,6 +168,7 @@ public sealed class ApplicationController : IDisposable
             {
                 fileLogger.Configure(Settings.General.EnableLogging, Settings.General.LogRetentionDays);
             }
+            historyStore.Configure(Settings.General.EnableLogging, Settings.General.LogRetentionDays);
 
             logger.Information("설정을 저장하고 즉시 적용했습니다.");
         }
@@ -248,19 +258,20 @@ public sealed class ApplicationController : IDisposable
 
         try
         {
+            bool isReadTranslation = hotkeyId == GlobalHotkeyService.ReadHotkeyId;
             WindowIdentity sourceWindow = activeWindow.Capture();
             InputAccessResult access = inputAccess.Check(sourceWindow);
             if (!access.IsAllowed)
             {
-                ShowPopup(TranslationPopupKind.Error, access.ErrorMessage!);
+                ShowPopup(isReadTranslation, TranslationPopupKind.Error, access.ErrorMessage!);
                 return;
             }
-            string configuredTargetLanguage = hotkeyId == GlobalHotkeyService.ReadHotkeyId
+            string configuredTargetLanguage = isReadTranslation
                 ? Settings.Translation.ReadTargetLanguage
                 : Settings.Translation.ReplaceTargetLanguage;
             string? targetLanguage = await ResolveTargetLanguageAsync(
                 configuredTargetLanguage,
-                hotkeyId == GlobalHotkeyService.ReadHotkeyId,
+                isReadTranslation,
                 shutdown.Token);
             if (targetLanguage is null)
             {
@@ -269,7 +280,7 @@ public sealed class ApplicationController : IDisposable
 
             if (!activeWindow.IsStillActive(sourceWindow))
             {
-                ShowPopup(TranslationPopupKind.Warning, "입력 위치가 변경되어 번역을 취소했습니다.");
+                ShowPopup(isReadTranslation, TranslationPopupKind.Warning, "입력 위치가 변경되어 번역을 취소했습니다.");
                 return;
             }
 
@@ -284,9 +295,9 @@ public sealed class ApplicationController : IDisposable
 
             if (!result.IsSuccess)
             {
-                if (hotkeyId == GlobalHotkeyService.ReadHotkeyId)
+                if (isReadTranslation)
                 {
-                    ShowPopup(TranslationPopupKind.Error, result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.");
+                    ShowPopup(true, TranslationPopupKind.Error, result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.");
                 }
                 else
                 {
@@ -295,7 +306,7 @@ public sealed class ApplicationController : IDisposable
                 return;
             }
 
-            if (hotkeyId == GlobalHotkeyService.ReadHotkeyId)
+            if (isReadTranslation)
             {
                 await ExecuteReadTranslationAsync(result.Text!, targetLanguage, shutdown.Token);
             }
@@ -313,7 +324,7 @@ public sealed class ApplicationController : IDisposable
             logger.Error("번역 작업 중 예기치 않은 오류가 발생했습니다.", ex);
             if (hotkeyId == GlobalHotkeyService.ReadHotkeyId)
             {
-                ShowPopup(TranslationPopupKind.Error, "번역 작업 중 오류가 발생했습니다.");
+                ShowPopup(true, TranslationPopupKind.Error, "번역 작업 중 오류가 발생했습니다.");
             }
             else
             {
@@ -333,7 +344,7 @@ public sealed class ApplicationController : IDisposable
     {
         if (Settings.General.ShowTranslatingPopup)
         {
-            ShowPopup(TranslationPopupKind.Translating, "번역 중...");
+            ShowPopup(true, TranslationPopupKind.Translating, "번역 중...");
         }
         TranslationResult translation = await TranslationProvider.TranslateAsync(
             new TranslationRequest(originalText, targetLanguage),
@@ -342,12 +353,17 @@ public sealed class ApplicationController : IDisposable
         if (!translation.IsSuccess)
         {
             logger.Warning($"읽기 번역에 실패했습니다. Kind={translation.FailureKind}, Characters={originalText.Length}");
-            ShowPopup(TranslationPopupKind.Error, translation.ErrorMessage ?? "번역에 실패했습니다.");
+            ShowPopup(true, TranslationPopupKind.Error, translation.ErrorMessage ?? "번역에 실패했습니다.");
             return;
         }
 
         logger.Information($"읽기 번역을 완료했습니다. InputCharacters={originalText.Length}, OutputCharacters={translation.TranslatedText!.Length}");
-        ShowPopup(TranslationPopupKind.Success, translation.TranslatedText!, translation.TranslatedText);
+        AddHistory(
+            TranslationHistoryKind.Read,
+            targetLanguage,
+            originalText,
+            translation.TranslatedText!);
+        ShowPopup(true, TranslationPopupKind.Success, translation.TranslatedText!, translation.TranslatedText);
     }
 
     private async Task ExecuteReplaceTranslationAsync(
@@ -358,7 +374,7 @@ public sealed class ApplicationController : IDisposable
     {
         if (Settings.General.ShowTranslatingPopup)
         {
-            ShowPopup(TranslationPopupKind.Translating, "번역 중...");
+            ShowPopup(false, TranslationPopupKind.Translating, "번역 중...");
         }
         TranslationResult translation = await TranslationProvider.TranslateAsync(
             new TranslationRequest(originalText, targetLanguage),
@@ -367,7 +383,7 @@ public sealed class ApplicationController : IDisposable
         if (!translation.IsSuccess)
         {
             logger.Warning($"작성 번역에 실패했습니다. Kind={translation.FailureKind}, Characters={originalText.Length}");
-            ShowPopup(TranslationPopupKind.Error, translation.ErrorMessage ?? "번역에 실패했습니다.");
+            ShowPopup(false, TranslationPopupKind.Error, translation.ErrorMessage ?? "번역에 실패했습니다.");
             return;
         }
 
@@ -375,6 +391,11 @@ public sealed class ApplicationController : IDisposable
             originalText,
             translation.TranslatedText!,
             ReplaceOutputFormatter.Parse(Settings.Translation.ReplaceFormat));
+        AddHistory(
+            TranslationHistoryKind.Replace,
+            targetLanguage,
+            originalText,
+            translation.TranslatedText!);
 
         if (!activeWindow.IsStillActive(sourceWindow))
         {
@@ -406,6 +427,7 @@ public sealed class ApplicationController : IDisposable
             {
                 logger.Warning("클립보드가 변경되어 작성 번역 자동 치환을 취소했습니다.");
                 ShowPopup(
+                    false,
                     TranslationPopupKind.Warning,
                     $"클립보드가 변경되어 자동 치환을 취소했습니다.\r\n번역 결과를 확인한 후 복사 버튼을 눌러 주세요.\r\n\r\n{replacement}",
                     replacement);
@@ -413,12 +435,13 @@ public sealed class ApplicationController : IDisposable
             }
 
             logger.Information($"작성 번역을 완료했습니다. InputCharacters={originalText.Length}, OutputCharacters={replacement.Length}");
-            ShowPopup(TranslationPopupKind.Success, "선택 영역을 번역문으로 교체했습니다.");
+            ShowPopup(false, TranslationPopupKind.Success, "선택 영역을 번역문으로 교체했습니다.");
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             logger.Error("작성 번역 결과를 붙여넣지 못했습니다.", ex);
             ShowPopup(
+                false,
                 TranslationPopupKind.Warning,
                 $"자동 입력에 실패했습니다. 번역 결과를 확인한 후 복사 버튼을 눌러 주세요.\r\n\r\n{replacement}",
                 replacement);
@@ -429,6 +452,7 @@ public sealed class ApplicationController : IDisposable
     {
         logger.Warning("활성 창 또는 포커스가 변경되어 작성 번역 자동 치환을 취소했습니다.");
         ShowPopup(
+            false,
             TranslationPopupKind.Warning,
             $"활성 창이 변경되어 자동 치환을 취소했습니다.\r\n번역 결과를 확인한 후 복사 버튼을 눌러 주세요.\r\n\r\n{replacement}",
             replacement);
@@ -451,7 +475,7 @@ public sealed class ApplicationController : IDisposable
         LanguageSelectionRequested?.Invoke(this, request);
         if (!request.WasHandled)
         {
-            ShowPopup(TranslationPopupKind.Error, "언어 선택 창을 표시하지 못했습니다.");
+            ShowPopup(isReadTranslation, TranslationPopupKind.Error, "언어 선택 창을 표시하지 못했습니다.");
             return null;
         }
 
@@ -514,6 +538,8 @@ public sealed class ApplicationController : IDisposable
         target.General.RunAtWindowsStartup = source.General.RunAtWindowsStartup;
         target.General.ShowTranslatingPopup = source.General.ShowTranslatingPopup;
         target.General.PopupTimeoutMs = source.General.PopupTimeoutMs;
+        target.General.ReadPopupTimeoutMs = source.General.ReadPopupTimeoutMs;
+        target.General.ReplacePopupTimeoutMs = source.General.ReplacePopupTimeoutMs;
         target.General.EnableLogging = source.General.EnableLogging;
         target.General.LogRetentionDays = source.General.LogRetentionDays;
 
@@ -532,6 +558,7 @@ public sealed class ApplicationController : IDisposable
         target.Translation.ReplaceRecentTargetLanguage = source.Translation.ReplaceRecentTargetLanguage;
         target.Translation.TranslationStyle = source.Translation.TranslationStyle;
         target.Translation.Politeness = source.Translation.Politeness;
+        target.Translation.CustomInstructions = source.Translation.CustomInstructions;
         target.Translation.Glossary = source.Translation.Glossary;
         target.Translation.ExcludedTerms = source.Translation.ExcludedTerms;
 
@@ -546,12 +573,36 @@ public sealed class ApplicationController : IDisposable
     private void Notify(string message, ToolTipIcon icon) =>
         NotificationRequested?.Invoke(this, new UserNotificationEventArgs(message, icon));
 
-    private void ShowPopup(TranslationPopupKind kind, string message, string? copyText = null) =>
+    private void AddHistory(
+        TranslationHistoryKind kind,
+        string targetLanguage,
+        string originalText,
+        string translatedText)
+    {
+        historyStore.Append(new TranslationHistoryEntry(
+            DateTimeOffset.Now,
+            kind,
+            targetLanguage,
+            originalText,
+            translatedText));
+        if (Settings.General.EnableLogging)
+        {
+            TranslationHistoryChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void ShowPopup(
+        bool isReadTranslation,
+        TranslationPopupKind kind,
+        string message,
+        string? copyText = null) =>
         TranslationPopupRequested?.Invoke(this, new TranslationPopupRequestedEventArgs(
             kind,
             message,
             copyText,
-            Settings.General.PopupTimeoutMs));
+            isReadTranslation
+                ? Settings.General.ReadPopupTimeoutMs
+                : Settings.General.ReplacePopupTimeoutMs));
 
     public void Dispose()
     {

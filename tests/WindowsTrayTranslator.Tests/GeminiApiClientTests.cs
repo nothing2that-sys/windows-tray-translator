@@ -54,6 +54,31 @@ public sealed class GeminiApiClientTests
         Assert.Equal("첫 줄\r\n\r\n마지막 줄", result.TranslatedText);
     }
 
+    [Fact]
+    public async Task TranslateAsync_SingleLineResponse_RemovesLeakedInternalMarker()
+    {
+        RecordingHandler handler = new(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"" +
+                "⟦WTT-LINE-000001⟧Trời ơi mình nhấn nhầm nút copy" +
+                "\"}]}}]}")
+        });
+        GeminiApiClient client = new(new HttpClient(handler), new TestLogger());
+
+        TranslationResult result = await client.TranslateAsync(
+            "key",
+            "model",
+            new TranslationRequest("아니 복사를 잘못 눌러서", "Vietnamese"),
+            10,
+            0,
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Trời ơi mình nhấn nhầm nút copy", result.TranslatedText);
+        Assert.DoesNotContain("WTT-LINE", result.TranslatedText);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized, TranslationFailureKind.Authentication)]
     [InlineData(HttpStatusCode.Forbidden, TranslationFailureKind.Authentication)]

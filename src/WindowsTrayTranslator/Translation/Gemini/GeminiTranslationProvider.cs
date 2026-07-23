@@ -35,6 +35,7 @@ public sealed class GeminiTranslationProvider : ITranslationProvider
             Preferences = new TranslationPreferences(
                 settings.Translation.TranslationStyle,
                 settings.Translation.Politeness,
+                settings.Translation.CustomInstructions,
                 settings.Translation.Glossary,
                 settings.Translation.ExcludedTerms)
         };

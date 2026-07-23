@@ -13,10 +13,11 @@ public sealed class SettingsForm : Form
     private readonly CheckBox startupCheckBox = new() { Text = "Windows 시작 시 자동 실행", AutoSize = true };
     private readonly CheckBox translatingPopupCheckBox = new() { Text = "번역 중 상태 팝업 표시", AutoSize = true };
     private readonly CheckBox loggingCheckBox = new() { Text = "로그 기록 활성화", AutoSize = true };
-    private readonly NumericUpDown popupTimeoutNumeric = CreateNumeric(1000, 60000, 1000);
+    private readonly NumericUpDown readPopupTimeoutNumeric = CreateNumeric(1000, 60000, 1000);
+    private readonly NumericUpDown replacePopupTimeoutNumeric = CreateNumeric(1000, 60000, 1000);
     private readonly NumericUpDown logRetentionNumeric = CreateNumeric(1, 365);
 
-    private readonly ComboBox readLanguageCombo = CreateEditableCombo("Select", "Korean", "English", "Japanese", "Chinese (Simplified)", "Vietnamese");
+    private readonly ComboBox readLanguageCombo = CreateEditableCombo("Select", "Auto", "Korean", "English", "Japanese", "Chinese (Simplified)", "Vietnamese");
     private readonly ComboBox replaceLanguageCombo = CreateEditableCombo("Select", "English", "Korean", "Japanese", "Chinese (Simplified)", "Vietnamese");
     private readonly ComboBox replaceFormatCombo = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Label replaceFormatPreviewLabel = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
@@ -30,6 +31,7 @@ public sealed class SettingsForm : Form
     private readonly CheckBox clipboardFirstCheckBox = new() { Text = "Ctrl+C 방식 우선 사용", AutoSize = true };
     private readonly ComboBox styleCombo = CreateDropDownList("Natural", "Literal", "Business");
     private readonly ComboBox politenessCombo = CreateDropDownList("Auto", "Formal", "Casual");
+    private readonly TextBox customInstructionsTextBox = new() { Dock = DockStyle.Fill, Multiline = true, Height = 70, ScrollBars = ScrollBars.Vertical };
     private readonly TextBox glossaryTextBox = new() { Dock = DockStyle.Fill, Multiline = true, Height = 70, ScrollBars = ScrollBars.Vertical };
     private readonly TextBox excludedTermsTextBox = new() { Dock = DockStyle.Fill, Multiline = true, Height = 55, ScrollBars = ScrollBars.Vertical };
 
@@ -204,7 +206,8 @@ public sealed class SettingsForm : Form
         AddFullRow(table, startupCheckBox);
         AddSectionRow(table, "알림 및 기록");
         AddFullRow(table, translatingPopupCheckBox);
-        AddRow(table, "팝업 자동 닫기 (ms)", popupTimeoutNumeric);
+        AddRow(table, "읽기 팝업 자동 닫기 (ms)", readPopupTimeoutNumeric);
+        AddRow(table, "작성 팝업 자동 닫기 (ms)", replacePopupTimeoutNumeric);
         AddFullRow(table, loggingCheckBox);
         AddRow(table, "로그 보존 기간 (일)", logRetentionNumeric);
         return WrapTab("일반", table);
@@ -219,7 +222,7 @@ public sealed class SettingsForm : Form
         {
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
-            Text = "Select를 선택하면 단축키를 누를 때 번역할 언어를 고르는 팝업이 표시됩니다."
+            Text = "Select: 단축키를 누를 때 언어 선택 / Auto: 한국어는 영어로, 그 외 언어는 한국어로 번역"
         });
         AddRow(table, "작성 대상 언어", replaceLanguageCombo);
         AddFullRow(table, new Label
@@ -254,6 +257,13 @@ public sealed class SettingsForm : Form
         AddFullRow(table, new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "Natural: 자연스럽게 / Literal: 직역 중심 / Business: 비즈니스 문체" });
         AddRow(table, "말투", politenessCombo);
         AddFullRow(table, new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "Auto: 원문 유지 / Formal: 존댓말·격식 / Casual: 친근한 말투" });
+        AddRow(table, "추가 자연어 지침", customInstructionsTextBox);
+        AddFullRow(table, new Label
+        {
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+            Text = "예: 개발자끼리 대화하듯 간결하게 번역하고, 제품명은 원문으로 유지해 주세요."
+        });
         AddRow(table, "사용자 용어집", glossaryTextBox);
         AddFullRow(table, new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "한 줄에 하나씩 입력하세요. 예: fixture=지그" });
         AddRow(table, "번역 제외 단어", excludedTermsTextBox);
@@ -303,7 +313,8 @@ public sealed class SettingsForm : Form
         translationEnabledCheckBox.Checked = settings.General.TranslationEnabled;
         startupCheckBox.Checked = controller.IsStartupEnabled;
         translatingPopupCheckBox.Checked = settings.General.ShowTranslatingPopup;
-        popupTimeoutNumeric.Value = settings.General.PopupTimeoutMs;
+        readPopupTimeoutNumeric.Value = settings.General.ReadPopupTimeoutMs;
+        replacePopupTimeoutNumeric.Value = settings.General.ReplacePopupTimeoutMs;
         loggingCheckBox.Checked = settings.General.EnableLogging;
         logRetentionNumeric.Value = settings.General.LogRetentionDays;
 
@@ -324,6 +335,7 @@ public sealed class SettingsForm : Form
         clipboardFirstCheckBox.Checked = !settings.Translation.PreferUiAutomation;
         styleCombo.SelectedItem = settings.Translation.TranslationStyle;
         politenessCombo.SelectedItem = settings.Translation.Politeness;
+        customInstructionsTextBox.Text = settings.Translation.CustomInstructions;
         glossaryTextBox.Text = settings.Translation.Glossary;
         excludedTermsTextBox.Text = settings.Translation.ExcludedTerms;
 
@@ -359,7 +371,8 @@ public sealed class SettingsForm : Form
             TranslationEnabled = translationEnabledCheckBox.Checked,
             RunAtWindowsStartup = startupCheckBox.Checked,
             ShowTranslatingPopup = translatingPopupCheckBox.Checked,
-            PopupTimeoutMs = (int)popupTimeoutNumeric.Value,
+            ReadPopupTimeoutMs = (int)readPopupTimeoutNumeric.Value,
+            ReplacePopupTimeoutMs = (int)replacePopupTimeoutNumeric.Value,
             EnableLogging = loggingCheckBox.Checked,
             LogRetentionDays = (int)logRetentionNumeric.Value
         },
@@ -380,6 +393,7 @@ public sealed class SettingsForm : Form
             PreferUiAutomation = !clipboardFirstCheckBox.Checked,
             TranslationStyle = styleCombo.SelectedItem?.ToString() ?? "Natural",
             Politeness = politenessCombo.SelectedItem?.ToString() ?? "Auto",
+            CustomInstructions = customInstructionsTextBox.Text,
             Glossary = glossaryTextBox.Text,
             ExcludedTerms = excludedTermsTextBox.Text
         },

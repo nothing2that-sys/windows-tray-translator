@@ -17,6 +17,8 @@ public sealed class ConfigurationServiceTests : IDisposable
         Assert.Equal("Alt+R", settings.Translation.ReadHotkey);
         Assert.Equal("Alt+T", settings.Translation.ReplaceHotkey);
         Assert.Equal("gemini-3.5-flash-lite", settings.Api.Model);
+        Assert.Equal(5000, settings.General.ReadPopupTimeoutMs);
+        Assert.Equal(5000, settings.General.ReplacePopupTimeoutMs);
         Assert.True(File.Exists(file));
     }
 
@@ -36,12 +38,35 @@ public sealed class ConfigurationServiceTests : IDisposable
         AppSettings settings = new ConfigurationService(file, new TestLogger()).Load();
 
         Assert.Equal(1000, settings.General.PopupTimeoutMs);
+        Assert.Equal(1000, settings.General.ReadPopupTimeoutMs);
+        Assert.Equal(1000, settings.General.ReplacePopupTimeoutMs);
         Assert.Equal(365, settings.General.LogRetentionDays);
         Assert.Equal(1, settings.Translation.MaxInputCharacters);
         Assert.Equal("Alt+R", settings.Translation.ReadHotkey);
         Assert.Equal("TranslationWithOriginal", settings.Translation.ReplaceFormat);
         Assert.Equal("gemini-3.5-flash-lite", settings.Api.Model);
         Assert.Equal(120, settings.Api.RequestTimeoutSeconds);
+    }
+
+    [Fact]
+    public void Load_SeparatePopupTimeouts_NormalizesIndependently()
+    {
+        Directory.CreateDirectory(directory);
+        string file = Path.Combine(directory, "appsettings.json");
+        File.WriteAllText(file, """
+            {
+              "General": {
+                "PopupTimeoutMs": 5000,
+                "ReadPopupTimeoutMs": 2500,
+                "ReplacePopupTimeoutMs": 9000
+              }
+            }
+            """);
+
+        AppSettings settings = new ConfigurationService(file, new TestLogger()).Load();
+
+        Assert.Equal(2500, settings.General.ReadPopupTimeoutMs);
+        Assert.Equal(9000, settings.General.ReplacePopupTimeoutMs);
     }
 
     [Fact]
@@ -62,7 +87,7 @@ public sealed class ConfigurationServiceTests : IDisposable
     }
 
     [Fact]
-    public void Load_LegacyAutoTargets_MigratesThemToSelect()
+    public void Load_AutoTargets_PreservesReadAndMigratesReplaceToSelect()
     {
         Directory.CreateDirectory(directory);
         string file = Path.Combine(directory, "appsettings.json");
@@ -74,7 +99,7 @@ public sealed class ConfigurationServiceTests : IDisposable
 
         AppSettings settings = new ConfigurationService(file, new TestLogger()).Load();
 
-        Assert.Equal("Select", settings.Translation.ReadTargetLanguage);
+        Assert.Equal("Auto", settings.Translation.ReadTargetLanguage);
         Assert.Equal("Select", settings.Translation.ReplaceTargetLanguage);
     }
 

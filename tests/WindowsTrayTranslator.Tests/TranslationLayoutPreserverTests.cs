@@ -42,4 +42,31 @@ public sealed class TranslationLayoutPreserverTests
         Assert.False(restored);
         Assert.Equal("첫 번째 두 번째", result);
     }
+
+    [Fact]
+    public void Restore_WrongMarkerCount_RemovesInternalMarkersFromFallback()
+    {
+        TranslationLayoutPreserver layout = TranslationLayoutPreserver.Prepare("First\nSecond");
+
+        string result = layout.Restore(
+            "⟦WTT-LINE-000001⟧ 첫 번째\n⟦WTT-LINE-000002⟧ 두 번째\n⟦WTT-LINE-000003⟧ 추가",
+            out bool restored);
+
+        Assert.False(restored);
+        Assert.DoesNotContain("WTT-LINE", result);
+        Assert.Equal("첫 번째\n두 번째\n추가", result);
+    }
+
+    [Fact]
+    public void Restore_WrongMarkerOrder_RemovesInternalMarkersFromFallback()
+    {
+        TranslationLayoutPreserver layout = TranslationLayoutPreserver.Prepare("First\nSecond");
+
+        string result = layout.Restore(
+            "⟦WTT-LINE-000002⟧ 두 번째\n⟦WTT-LINE-000001⟧ 첫 번째",
+            out bool restored);
+
+        Assert.False(restored);
+        Assert.DoesNotContain("WTT-LINE", result);
+    }
 }

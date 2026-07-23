@@ -24,7 +24,7 @@ public sealed class ConfigurationService
     {
         if (!File.Exists(settingsFile))
         {
-            AppSettings defaults = DefaultSettingsFactory.Create();
+            AppSettings defaults = SettingsValidator.Normalize(DefaultSettingsFactory.Create());
             Save(defaults);
             return defaults;
         }
