@@ -21,8 +21,8 @@ public sealed class LanguageSelectionPopupForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        Padding = new Padding(12);
-        BackColor = Color.FromArgb(35, 38, 45);
+        Padding = new Padding(14);
+        BackColor = Color.FromArgb(27, 31, 40);
         ForeColor = Color.White;
         Text = "WindowsTrayTranslator.LanguageSelection";
 
@@ -37,8 +37,17 @@ public sealed class LanguageSelectionPopupForm : Form
         {
             Text = "번역할 언어를 선택하세요",
             AutoSize = true,
+            Font = new Font("Segoe UI Semibold", 11f),
             ForeColor = ForeColor,
-            Margin = new Padding(4, 2, 4, 8)
+            Margin = new Padding(4, 2, 4, 2)
+        });
+        content.Controls.Add(new Label
+        {
+            Text = "숫자키 또는 ↑ ↓ + Enter",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8.5f),
+            ForeColor = Color.FromArgb(166, 177, 198),
+            Margin = new Padding(4, 0, 4, 10)
         });
 
         for (int index = 0; index < languages.Count; index++)
@@ -48,6 +57,8 @@ public sealed class LanguageSelectionPopupForm : Form
         }
 
         Button cancel = CreateButton("취소");
+        cancel.ForeColor = Color.FromArgb(190, 198, 214);
+        cancel.Margin = new Padding(2, 8, 2, 2);
         cancel.Click += (_, _) => Complete(request, null);
         content.Controls.Add(cancel);
         Controls.Add(content);
@@ -82,6 +93,15 @@ public sealed class LanguageSelectionPopupForm : Form
         }
     }
 
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        using SolidBrush accent = new(AppTheme.Primary);
+        e.Graphics.FillRectangle(accent, 0, 0, 4, ClientSize.Height);
+        using Pen border = new(Color.FromArgb(76, 84, 100));
+        e.Graphics.DrawRectangle(border, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+    }
+
     private void AddLanguageButton(
         FlowLayoutPanel panel,
         LanguageSelectionRequestedEventArgs request,
@@ -97,11 +117,16 @@ public sealed class LanguageSelectionPopupForm : Form
     private static Button CreateButton(string text) => new()
     {
         Text = text,
-        Width = 170,
-        Height = 30,
+        Width = 220,
+        Height = 36,
         FlatStyle = FlatStyle.Flat,
-        BackColor = Color.FromArgb(55, 59, 68),
+        FlatAppearance = { BorderColor = Color.FromArgb(70, 77, 91) },
+        BackColor = Color.FromArgb(43, 48, 59),
         ForeColor = Color.White,
+        Font = new Font("Segoe UI", 9.5f),
+        TextAlign = ContentAlignment.MiddleLeft,
+        Padding = new Padding(10, 0, 8, 0),
+        Cursor = Cursors.Hand,
         TabStop = false,
         Margin = new Padding(2)
     };
@@ -196,8 +221,11 @@ public sealed class LanguageSelectionPopupForm : Form
         for (int index = 0; index < languageButtons.Count; index++)
         {
             languageButtons[index].BackColor = index == selectedIndex
-                ? Color.FromArgb(38, 105, 165)
-                : Color.FromArgb(55, 59, 68);
+                ? AppTheme.Primary
+                : Color.FromArgb(43, 48, 59);
+            languageButtons[index].FlatAppearance.BorderColor = index == selectedIndex
+                ? Color.FromArgb(104, 163, 255)
+                : Color.FromArgb(70, 77, 91);
         }
     }
 

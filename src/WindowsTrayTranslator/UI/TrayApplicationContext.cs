@@ -28,6 +28,17 @@ public sealed class TrayApplicationContext : ApplicationContext
         enabledItem.CheckedChanged += (_, _) => controller.SetTranslationEnabled(enabledItem.Checked);
 
         ContextMenuStrip menu = new();
+        menu.Font = new Font("Segoe UI", 9.5f);
+        menu.Padding = new Padding(4);
+        menu.Renderer = new ToolStripProfessionalRenderer(new AppMenuColorTable());
+        ToolStripMenuItem appTitle = new("Windows Tray Translator")
+        {
+            Enabled = false,
+            Font = new Font("Segoe UI Semibold", 9.5f),
+            Image = AppIconProvider.ApplicationIcon.ToBitmap()
+        };
+        menu.Items.Add(appTitle);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("설정 열기", null, (_, _) => OpenSettings());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(enabledItem);
@@ -38,7 +49,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         notifyIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = AppIconProvider.ApplicationIcon,
             Text = "Windows Tray Translator",
             ContextMenuStrip = menu,
             Visible = true
@@ -91,7 +102,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     private static void ShowAbout() => MessageBox.Show(
-        ".NET 8 기반 Gemini 번역 트레이 애플리케이션\n\n현재 구현 범위: Phase 1~6",
+        "Gemini 기반 Windows 번역 도우미\n\nAlt+R  읽기 번역\nAlt+T  작성 번역\n\n.NET 8 · 구현 범위 Phase 1~7",
         "Windows Tray Translator",
         MessageBoxButtons.OK,
         MessageBoxIcon.Information);

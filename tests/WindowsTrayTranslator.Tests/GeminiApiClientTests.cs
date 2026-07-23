@@ -28,6 +28,32 @@ public sealed class GeminiApiClientTests
         Assert.DoesNotContain("secret-key", handler.LastRequest.RequestUri!.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task TranslateAsync_MultilineResponse_RestoresOriginalLineLayout()
+    {
+        RecordingHandler handler = new(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"" +
+                "⟦WTT-LINE-000001⟧ 첫 줄\\n" +
+                "⟦WTT-LINE-000002⟧\\n" +
+                "⟦WTT-LINE-000003⟧ 마지막 줄" +
+                "\"}]}}]}")
+        });
+        GeminiApiClient client = new(new HttpClient(handler), new TestLogger());
+
+        TranslationResult result = await client.TranslateAsync(
+            "key",
+            "model",
+            new TranslationRequest("First\r\n\r\nLast", "Korean"),
+            10,
+            0,
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("첫 줄\r\n\r\n마지막 줄", result.TranslatedText);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized, TranslationFailureKind.Authentication)]
     [InlineData(HttpStatusCode.Forbidden, TranslationFailureKind.Authentication)]

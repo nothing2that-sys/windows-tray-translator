@@ -10,6 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>WindowsTrayTranslator</AssemblyName>
     <RootNamespace>WindowsTrayTranslator</RootNamespace>
+    <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 

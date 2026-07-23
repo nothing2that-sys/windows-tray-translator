@@ -8,6 +8,13 @@ public sealed class TranslationPopupForm : Form
     private const int WsExToolWindow = 0x00000080;
     private const int MaximumTextWidth = 480;
 
+    private readonly Label titleLabel = new()
+    {
+        AutoSize = true,
+        Font = new Font("Segoe UI Semibold", 9.5f),
+        ForeColor = Color.FromArgb(120, 181, 255),
+        BackColor = Color.Transparent
+    };
     private readonly TextBox messageLabel = new()
     {
         AutoSize = false,
@@ -25,6 +32,7 @@ public sealed class TranslationPopupForm : Form
     private readonly System.Windows.Forms.Timer closeTimer = new();
     private string? copyText;
     private int closeTimeoutMs;
+    private Color accentColor = Color.FromArgb(39, 139, 245);
 
     public TranslationPopupForm()
     {
@@ -32,22 +40,27 @@ public sealed class TranslationPopupForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        Padding = new Padding(12);
+        Padding = new Padding(16, 12, 12, 12);
         BackColor = Color.FromArgb(35, 38, 45);
         ForeColor = Color.White;
         Text = "WindowsTrayTranslator.TranslationPopup";
 
         messageLabel.ForeColor = ForeColor;
         messageLabel.BackColor = BackColor;
+        StyleActionButton(copyButton, primary: true);
+        StyleActionButton(closeButton, primary: false);
         copyButton.Click += (_, _) => CopyResult();
         closeButton.Click += (_, _) => Close();
         closeTimer.Tick += (_, _) => Close();
         MouseEnter += (_, _) => closeTimer.Stop();
         MouseLeave += (_, _) => RestartTimer();
+        titleLabel.MouseEnter += (_, _) => closeTimer.Stop();
+        titleLabel.MouseLeave += (_, _) => RestartTimer();
         messageLabel.MouseEnter += (_, _) => closeTimer.Stop();
         messageLabel.MouseLeave += (_, _) => RestartTimer();
         Click += (_, _) => Close();
 
+        Controls.Add(titleLabel);
         Controls.Add(messageLabel);
         Controls.Add(copyButton);
         Controls.Add(closeButton);
@@ -75,14 +88,24 @@ public sealed class TranslationPopupForm : Form
         copyText = resultToCopy;
         closeTimeoutMs = kind == TranslationPopupKind.Translating ? 0 : timeoutMs;
         messageLabel.Text = message;
+        titleLabel.Text = kind switch
+        {
+            TranslationPopupKind.Translating => "번역 중",
+            TranslationPopupKind.Success => "번역 완료",
+            TranslationPopupKind.Warning => "확인이 필요합니다",
+            TranslationPopupKind.Error => "번역 오류",
+            _ => "알림"
+        };
         copyButton.Visible = !string.IsNullOrEmpty(resultToCopy);
 
-        BackColor = kind switch
+        BackColor = Color.FromArgb(31, 35, 43);
+        accentColor = kind switch
         {
-            TranslationPopupKind.Error => Color.FromArgb(92, 35, 39),
-            TranslationPopupKind.Warning => Color.FromArgb(92, 70, 24),
-            _ => Color.FromArgb(35, 38, 45)
+            TranslationPopupKind.Error => Color.FromArgb(255, 100, 110),
+            TranslationPopupKind.Warning => Color.FromArgb(255, 191, 72),
+            _ => Color.FromArgb(54, 155, 255)
         };
+        titleLabel.ForeColor = accentColor;
         messageLabel.BackColor = BackColor;
 
         LayoutContent();
@@ -97,6 +120,26 @@ public sealed class TranslationPopupForm : Form
         }
 
         RestartTimer();
+    }
+
+    private static void StyleActionButton(Button button, bool primary)
+    {
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = primary ? 0 : 1;
+        button.FlatAppearance.BorderColor = Color.FromArgb(105, 112, 126);
+        button.BackColor = primary ? Color.FromArgb(35, 119, 220) : Color.FromArgb(52, 56, 65);
+        button.ForeColor = Color.White;
+        button.Padding = new Padding(8, 1, 8, 1);
+        button.UseVisualStyleBackColor = false;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        using SolidBrush accentBrush = new(accentColor);
+        e.Graphics.FillRectangle(accentBrush, 0, 0, 4, ClientSize.Height);
+        using Pen borderPen = new(Color.FromArgb(80, 255, 255, 255));
+        e.Graphics.DrawRectangle(borderPen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
     }
 
     private void LayoutContent()
@@ -114,7 +157,8 @@ public sealed class TranslationPopupForm : Form
         messageLabel.ScrollBars = measured.Height + 4 > maximumTextHeight
             ? ScrollBars.Vertical
             : ScrollBars.None;
-        messageLabel.SetBounds(Padding.Left, Padding.Top, textWidth, textHeight);
+        titleLabel.Location = new Point(Padding.Left, Padding.Top);
+        messageLabel.SetBounds(Padding.Left, titleLabel.Bottom + 6, textWidth, textHeight);
 
         int buttonTop = messageLabel.Bottom + 10;
         closeButton.Location = new Point(Padding.Left + textWidth - closeButton.PreferredSize.Width, buttonTop);

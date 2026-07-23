@@ -52,12 +52,15 @@ public sealed class SettingsForm : Form
     {
         this.controller = controller;
         Text = "Windows Tray Translator 설정";
+        Icon = AppIconProvider.ApplicationIcon;
+        Font = new Font("Segoe UI", 9f);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(700, 650);
+        ClientSize = new Size(700, 720);
+        BackColor = AppTheme.Canvas;
 
         replaceFormatCombo.Items.AddRange(
         [
@@ -70,38 +73,136 @@ public sealed class SettingsForm : Form
         fallbackModelCheckBox.CheckedChanged += (_, _) =>
             fallbackModelComboBox.Enabled = fallbackModelCheckBox.Checked;
 
-        TabControl tabs = new() { Dock = DockStyle.Fill };
+        TabControl tabs = new()
+        {
+            Dock = DockStyle.Fill,
+            DrawMode = TabDrawMode.OwnerDrawFixed,
+            ItemSize = new Size(120, 36),
+            SizeMode = TabSizeMode.Fixed
+        };
+        tabs.DrawItem += DrawTab;
         tabs.TabPages.Add(CreateGeneralTab());
         tabs.TabPages.Add(CreateTranslationTab());
         tabs.TabPages.Add(CreateApiTab());
 
-        Button saveButton = new() { Text = "저장", AutoSize = true };
+        Button saveButton = CreatePrimaryButton("저장");
         Button cancelButton = new() { Text = "취소", AutoSize = true, DialogResult = DialogResult.Cancel };
+        AppTheme.StyleSecondaryButton(cancelButton);
         saveButton.Click += (_, _) => SaveSettings();
         cancelButton.Click += (_, _) => Close();
 
         FlowLayoutPanel actions = new()
         {
             Dock = DockStyle.Bottom,
-            Height = 48,
-            Padding = new Padding(8),
+            Height = 54,
+            Padding = new Padding(12, 10, 12, 8),
             FlowDirection = FlowDirection.RightToLeft
         };
         actions.Controls.Add(cancelButton);
         actions.Controls.Add(saveButton);
 
+        Panel header = CreateHeader();
         Controls.Add(tabs);
         Controls.Add(actions);
+        Controls.Add(header);
         AcceptButton = saveButton;
         CancelButton = cancelButton;
         LoadSettings();
     }
 
+    private static Panel CreateHeader()
+    {
+        Panel header = new()
+        {
+            Dock = DockStyle.Top,
+            Height = 82,
+            BackColor = AppTheme.PrimaryDark,
+            Padding = new Padding(18, 12, 18, 10)
+        };
+
+        PictureBox icon = new()
+        {
+            Image = AppIconProvider.ApplicationIcon.ToBitmap(),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Location = new Point(18, 13),
+            Size = new Size(54, 54)
+        };
+        Label title = new()
+        {
+            AutoSize = true,
+            Font = new Font("Segoe UI Semibold", 14f),
+            ForeColor = Color.White,
+            Location = new Point(86, 15),
+            Text = "Windows Tray Translator"
+        };
+        Label subtitle = new()
+        {
+            AutoSize = true,
+            Font = new Font("Segoe UI", 9f),
+            ForeColor = Color.FromArgb(218, 231, 255),
+            Location = new Point(88, 47),
+            Text = "Alt+R 읽기 번역  ·  Alt+T 작성 번역"
+        };
+        Label status = new()
+        {
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            AutoSize = true,
+            BackColor = Color.FromArgb(40, 94, 183),
+            ForeColor = Color.FromArgb(211, 255, 228),
+            Font = new Font("Segoe UI Semibold", 8.5f),
+            Padding = new Padding(9, 4, 9, 4),
+            Location = new Point(598, 27),
+            Text = "● 실행 중"
+        };
+
+        header.Controls.Add(icon);
+        header.Controls.Add(title);
+        header.Controls.Add(subtitle);
+        header.Controls.Add(status);
+        return header;
+    }
+
+    private static Button CreatePrimaryButton(string text)
+    {
+        Button button = new() { Text = text };
+        AppTheme.StylePrimaryButton(button);
+        return button;
+    }
+
+    private static void DrawTab(object? sender, DrawItemEventArgs e)
+    {
+        if (sender is not TabControl tabs)
+        {
+            return;
+        }
+
+        bool selected = e.Index == tabs.SelectedIndex;
+        Rectangle bounds = e.Bounds;
+        using SolidBrush background = new(selected ? AppTheme.Surface : AppTheme.Canvas);
+        e.Graphics.FillRectangle(background, bounds);
+        if (selected)
+        {
+            using SolidBrush accent = new(AppTheme.Primary);
+            e.Graphics.FillRectangle(accent, bounds.Left + 10, bounds.Bottom - 3, bounds.Width - 20, 3);
+        }
+
+        using Font selectedFont = new("Segoe UI Semibold", 9.5f);
+        TextRenderer.DrawText(
+            e.Graphics,
+            tabs.TabPages[e.Index].Text,
+            selected ? selectedFont : tabs.Font,
+            bounds,
+            selected ? AppTheme.PrimaryDark : AppTheme.MutedText,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+    }
+
     private TabPage CreateGeneralTab()
     {
         TableLayoutPanel table = CreateTable();
+        AddSectionRow(table, "프로그램 동작");
         AddFullRow(table, translationEnabledCheckBox);
         AddFullRow(table, startupCheckBox);
+        AddSectionRow(table, "알림 및 기록");
         AddFullRow(table, translatingPopupCheckBox);
         AddRow(table, "팝업 자동 닫기 (ms)", popupTimeoutNumeric);
         AddFullRow(table, loggingCheckBox);
@@ -112,6 +213,7 @@ public sealed class SettingsForm : Form
     private TabPage CreateTranslationTab()
     {
         TableLayoutPanel table = CreateTable();
+        AddSectionRow(table, "언어 및 출력");
         AddRow(table, "읽기 대상 언어", readLanguageCombo);
         AddFullRow(table, new Label
         {
@@ -128,22 +230,26 @@ public sealed class SettingsForm : Form
         });
         AddRow(table, "작성 결과 형식", replaceFormatCombo);
         AddFullRow(table, replaceFormatPreviewLabel);
+        AddSectionRow(table, "단축키");
         AddRow(table, "읽기 단축키", readHotkeyTextBox);
         AddRow(table, "작성 단축키", replaceHotkeyTextBox);
 
         Button resetHotkeysButton = new() { Text = "단축키 기본값 복원", AutoSize = true };
+        AppTheme.StyleSecondaryButton(resetHotkeysButton);
         resetHotkeysButton.Click += (_, _) =>
         {
             readHotkeyTextBox.Text = "Alt+R";
             replaceHotkeyTextBox.Text = "Alt+T";
         };
         AddFullRow(table, resetHotkeysButton);
+        AddSectionRow(table, "선택 영역 가져오기");
         AddRow(table, "최대 입력 문자 수", maxInputNumeric);
         AddRow(table, "복사 제한 시간 (ms)", copyTimeoutNumeric);
         AddRow(table, "클립보드 복원 지연 (ms)", restoreDelayNumeric);
         AddRow(table, "클립보드 재시도 횟수", retryCountNumeric);
         AddRow(table, "클립보드 재시도 간격 (ms)", retryDelayNumeric);
         AddFullRow(table, clipboardFirstCheckBox);
+        AddSectionRow(table, "번역 품질");
         AddRow(table, "번역 방식", styleCombo);
         AddFullRow(table, new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "Natural: 자연스럽게 / Literal: 직역 중심 / Business: 비즈니스 문체" });
         AddRow(table, "말투", politenessCombo);
@@ -164,11 +270,14 @@ public sealed class SettingsForm : Form
     private TabPage CreateApiTab()
     {
         TableLayoutPanel table = CreateTable();
+        AddSectionRow(table, "Gemini 연결");
         AddRow(table, "API 공급자", new Label { Text = "Gemini", AutoSize = true, Anchor = AnchorStyles.Left });
         AddRow(table, "API 키", apiKeyTextBox);
         AddRow(table, "저장 상태", savedKeyLabel);
         AddRow(table, "모델", modelComboBox);
+        AppTheme.StyleSecondaryButton(refreshModelsButton);
         AddFullRow(table, refreshModelsButton);
+        AddSectionRow(table, "안정성 옵션");
         AddFullRow(table, fallbackModelCheckBox);
         AddRow(table, "보조 모델", fallbackModelComboBox);
         AddRow(table, "요청 제한 시간 (초)", requestTimeoutNumeric);
@@ -176,6 +285,8 @@ public sealed class SettingsForm : Form
 
         FlowLayoutPanel apiActions = new() { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
         Button deleteButton = new() { Text = "저장된 API 키 삭제", AutoSize = true };
+        AppTheme.StylePrimaryButton(testButton);
+        AppTheme.StyleDangerButton(deleteButton);
         testButton.Click += TestConnectionAsync;
         refreshModelsButton.Click += RefreshModelsAsync;
         deleteButton.Click += (_, _) => DeleteApiKey();
@@ -378,7 +489,8 @@ public sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             AutoScroll = true,
-            Padding = new Padding(16),
+            Padding = new Padding(20, 12, 20, 20),
+            BackColor = AppTheme.Surface,
             ColumnCount = 2,
             RowCount = 0
         };
@@ -405,9 +517,12 @@ public sealed class SettingsForm : Form
         table.SetColumnSpan(control, 2);
     }
 
+    private static void AddSectionRow(TableLayoutPanel table, string title) =>
+        AddFullRow(table, AppTheme.CreateSectionLabel(title));
+
     private static TabPage WrapTab(string title, Control content)
     {
-        TabPage tab = new(title) { Padding = new Padding(4) };
+        TabPage tab = new(title) { Padding = new Padding(4), BackColor = AppTheme.Surface };
         tab.Controls.Add(content);
         return tab;
     }
