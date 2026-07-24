@@ -113,6 +113,27 @@ dist\windows-x64\
 ```
 
 - `self-contained`: .NET 런타임 포함. 별도 런타임 설치 없이 실행할 수 있습니다.
+
+설치된 앱 등록, 시작 메뉴 바로가기, 제거 프로그램을 포함한 설치 파일 2종은
+Inno Setup 6를 설치한 뒤 다음 명령으로 생성합니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-windows-installers.ps1
+```
+
+설치 마법사의 `추가 작업` 화면에서 사용자가 다음 항목을 각각 선택할 수 있습니다.
+
+- 바탕 화면에 바로가기 만들기
+- Windows에 로그인할 때 자동으로 실행하기
+
+사용자별 고정 설치 위치는
+`%LOCALAPPDATA%\Programs\WindowsTrayTranslator`이며 관리자 권한이 필요하지 않습니다.
+설정, API 키, 로그 및 번역 히스토리는 설치 폴더와 분리된
+`%LOCALAPPDATA%\WindowsTrayTranslator`에 유지됩니다.
+
+현재 자동 생성되는 설치 파일에는 코드 서명 인증서가 적용되지 않습니다.
+외부 배포 시 Windows SmartScreen 경고를 줄이려면 별도의 코드 서명 인증서로
+최종 설치 파일에 서명해야 합니다.
 - `framework-dependent`: .NET 8 Desktop Runtime 미포함. 파일은 작지만 대상 PC에 해당 런타임이 필요합니다.
 
 최종 산출물:

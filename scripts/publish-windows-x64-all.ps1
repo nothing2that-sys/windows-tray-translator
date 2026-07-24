@@ -24,6 +24,13 @@ function Remove-ExistingDirectory([string]$Path) {
     }
 }
 
+function Remove-ExistingFile([string]$Path) {
+    Assert-RepositoryChild $Path
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        Remove-Item -LiteralPath $Path -Force
+    }
+}
+
 function Assert-SingleExecutable([string]$OutputDirectory) {
     $executable = Join-Path $OutputDirectory "WindowsTrayTranslator.exe"
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
@@ -37,10 +44,11 @@ function Assert-SingleExecutable([string]$OutputDirectory) {
 }
 
 Remove-ExistingDirectory $workingRoot
-Remove-ExistingDirectory $distributionRoot
 New-Item -ItemType Directory -Path $selfContainedOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $frameworkDependentOutput -Force | Out-Null
 New-Item -ItemType Directory -Path $distributionRoot -Force | Out-Null
+Remove-ExistingFile $selfContainedArchive
+Remove-ExistingFile $frameworkDependentArchive
 
 & dotnet publish $project `
     -c Release `
@@ -83,6 +91,12 @@ Compress-Archive `
     -LiteralPath (Join-Path $frameworkDependentOutput "WindowsTrayTranslator.exe") `
     -DestinationPath $frameworkDependentArchive `
     -CompressionLevel Optimal
+
+$checksumLines = foreach ($archive in @($selfContainedArchive, $frameworkDependentArchive)) {
+    $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+    "$hash  $([IO.Path]::GetFileName($archive))"
+}
+Set-Content -LiteralPath (Join-Path $distributionRoot "SHA256SUMS.txt") -Value $checksumLines -Encoding ascii
 
 Write-Host ""
 Write-Host "Created Windows x64 release packages:"
