@@ -56,6 +56,8 @@ Phase 1~7 구현을 완료했습니다. 트레이 실행, 번역과 안전한 �
 
 API 탭의 `모델 목록 새로고침`은 현재 API 키에서 `generateContent`를 지원하는 모델만 불러옵니다. 종료된 1.5·2.0 모델은 저장을 차단하며, 선택적으로 기본 모델의 429·서버 오류·사용 불가 상황에서 보조 모델을 호출할 수 있습니다.
 
+네트워크, 시간 초과, 서버 오류 또는 잘못된 응답이 번역 작업 사이에서 3회 연속 발생하면 Gemini 통신 객체를 내부적으로 다시 만들고 현재 번역을 한 번 자동 재시도합니다. 인증, 사용량 제한, 모델 및 설정 오류는 재초기화해도 해결되지 않으므로 이 복구 대상에서 제외합니다.
+
 ## API 키 설정
 
 1. [Google AI Studio](https://aistudio.google.com/app/apikey)에서 Gemini API 키를 발급합니다.
@@ -93,6 +95,25 @@ dotnet publish src/WindowsTrayTranslator/WindowsTrayTranslator.csproj `
 ```
 
 또는 `scripts\publish-windows-x64.bat`을 실행합니다. 스크립트는 기존 출력 폴더를 정리한 다음 self-contained 단일 EXE인지 검사하고 SHA-256 해시를 출력합니다.
+
+런타임 포함·미포함 패키지를 한 번에 만들려면 다음 스크립트를 실행합니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\publish-windows-x64-all.ps1
+```
+
+생성 위치:
+
+```text
+dist\windows-x64\
+├── WindowsTrayTranslator-win-x64-self-contained.zip
+├── WindowsTrayTranslator-win-x64-framework-dependent.zip
+├── README.md
+└── SHA256SUMS.txt
+```
+
+- `self-contained`: .NET 런타임 포함. 별도 런타임 설치 없이 실행할 수 있습니다.
+- `framework-dependent`: .NET 8 Desktop Runtime 미포함. 파일은 작지만 대상 PC에 해당 런타임이 필요합니다.
 
 최종 산출물:
 

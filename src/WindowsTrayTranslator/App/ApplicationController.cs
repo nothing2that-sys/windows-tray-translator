@@ -64,7 +64,9 @@ public sealed class ApplicationController : IDisposable
             settings.General.EnableLogging,
             settings.General.LogRetentionDays,
             logger);
-        TranslationProvider = new GeminiTranslationProvider(geminiClient, secretStore, () => Settings);
+        TranslationProvider = new RecoveringTranslationProvider(
+            () => new GeminiTranslationSession(secretStore, () => Settings, logger),
+            logger);
 
         hotkeys = new GlobalHotkeyService(OnHotkeyPressed, logger);
         try
@@ -608,6 +610,10 @@ public sealed class ApplicationController : IDisposable
     {
         shutdown.Cancel();
         hotkeys.Dispose();
+        if (TranslationProvider is IDisposable disposableTranslationProvider)
+        {
+            disposableTranslationProvider.Dispose();
+        }
         httpClient.Dispose();
         shutdown.Dispose();
         operationGate.Dispose();
