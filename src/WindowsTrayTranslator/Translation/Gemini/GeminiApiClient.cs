@@ -216,7 +216,9 @@ public sealed class GeminiApiClient
     {
         string normalized = targetLanguage?.Trim() ?? string.Empty;
         return string.Equals(normalized, "Auto", StringComparison.OrdinalIgnoreCase)
-            ? "Detect the source language. If the text is predominantly Korean, translate it to English; otherwise translate it to Korean."
+            ? throw new ArgumentException(
+                "Auto target language must be resolved before creating a Gemini request.",
+                nameof(targetLanguage))
             : $"Translate to {normalized}.";
     }
 

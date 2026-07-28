@@ -1,6 +1,7 @@
 using System.Collections.Specialized;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using ComTypes = System.Runtime.InteropServices.ComTypes;
 using WindowsTrayTranslator.Logging;
 using WindowsTrayTranslator.Windows;
 
@@ -200,6 +201,7 @@ public sealed class ClipboardService : IClipboardService
         Image image => image.Clone(),
         MemoryStream stream => new MemoryStream(stream.ToArray(), writable: false),
         StringCollection collection => CloneStringCollection(collection),
+        ComTypes.IStream stream => CloneComStream(stream),
         _ when value.GetType().IsValueType => value,
         _ => null
     };
@@ -209,6 +211,47 @@ public sealed class ClipboardService : IClipboardService
         StringCollection clone = new();
         clone.AddRange(source.Cast<string>().ToArray());
         return clone;
+    }
+
+    private static MemoryStream CloneComStream(ComTypes.IStream source)
+    {
+        nint positionPointer = Marshal.AllocCoTaskMem(sizeof(long));
+        nint bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
+        try
+        {
+            source.Seek(0, 1, positionPointer);
+            long originalPosition = Marshal.ReadInt64(positionPointer);
+            try
+            {
+                source.Seek(0, 0, nint.Zero);
+                MemoryStream clone = new();
+                byte[] buffer = new byte[81920];
+                while (true)
+                {
+                    Marshal.WriteInt32(bytesReadPointer, 0);
+                    source.Read(buffer, buffer.Length, bytesReadPointer);
+                    int bytesRead = Marshal.ReadInt32(bytesReadPointer);
+                    if (bytesRead <= 0)
+                    {
+                        break;
+                    }
+
+                    clone.Write(buffer, 0, bytesRead);
+                }
+
+                clone.Position = 0;
+                return clone;
+            }
+            finally
+            {
+                source.Seek(originalPosition, 0, nint.Zero);
+            }
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(bytesReadPointer);
+            Marshal.FreeCoTaskMem(positionPointer);
+        }
     }
 
     private T Retry<T>(Func<T> action)

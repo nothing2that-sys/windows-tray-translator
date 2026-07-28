@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')]
-    [string]$AppVersion = "1.0.0",
+    [string]$AppVersion = "1.0.1",
     [switch]$SkipPublish
 )
 
@@ -15,6 +15,7 @@ $selfContainedSource = Join-Path $publishRoot "self-contained"
 $frameworkDependentSource = Join-Path $publishRoot "framework-dependent"
 $selfContainedSetup = Join-Path $distributionRoot "WindowsTrayTranslator-Setup-win-x64-self-contained.exe"
 $frameworkDependentSetup = Join-Path $distributionRoot "WindowsTrayTranslator-Setup-win-x64-framework-dependent.exe"
+$selfContainedSetupArchive = Join-Path $distributionRoot "WindowsTrayTranslator-Setup-win-x64-self-contained.zip"
 
 function Assert-RepositoryChild([string]$Path) {
     $resolved = [IO.Path]::GetFullPath($Path)
@@ -90,10 +91,15 @@ foreach ($sourceDirectory in @($selfContainedSource, $frameworkDependentSource))
 New-Item -ItemType Directory -Path $distributionRoot -Force | Out-Null
 Remove-ExistingFile $selfContainedSetup
 Remove-ExistingFile $frameworkDependentSetup
+Remove-ExistingFile $selfContainedSetupArchive
 
 $compiler = Find-InnoSetupCompiler
 Build-Installer $compiler $selfContainedSource $selfContainedSetup
 Build-Installer $compiler $frameworkDependentSource $frameworkDependentSetup
+Compress-Archive `
+    -LiteralPath $selfContainedSetup `
+    -DestinationPath $selfContainedSetupArchive `
+    -CompressionLevel Optimal
 
 $releaseFiles = @(
     Get-ChildItem -LiteralPath $distributionRoot -File |

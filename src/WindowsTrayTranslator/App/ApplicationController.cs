@@ -308,6 +308,7 @@ public sealed class ApplicationController : IDisposable
                 return;
             }
 
+            targetLanguage = AutomaticTargetLanguageResolver.Resolve(targetLanguage, result.Text!);
             if (isReadTranslation)
             {
                 await ExecuteReadTranslationAsync(result.Text!, targetLanguage, shutdown.Token);

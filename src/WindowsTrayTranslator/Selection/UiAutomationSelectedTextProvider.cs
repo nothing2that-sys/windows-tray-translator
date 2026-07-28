@@ -62,7 +62,7 @@ public sealed class UiAutomationSelectedTextProvider : ISelectedTextProvider
         {
             throw;
         }
-        catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException or COMException)
+        catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException or InvalidCastException or COMException)
         {
             logger.Warning($"UI Automation 선택 문자열 조회를 지원하지 않습니다. Process={sourceWindow.ProcessName}, Error={ex.GetType().Name}");
             return SelectedTextResult.Failure("선택된 문자열을 가져오지 못했습니다.", sourceWindow);
@@ -72,7 +72,8 @@ public sealed class UiAutomationSelectedTextProvider : ISelectedTextProvider
     private static string? ReadFocusedSelection()
     {
         AutomationElement? focused = AutomationElement.FocusedElement;
-        if (focused is null || (bool)focused.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty, true))
+        if (focused is null ||
+            IsPasswordPropertyValue(focused.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty, true)))
         {
             return null;
         }
@@ -92,4 +93,6 @@ public sealed class UiAutomationSelectedTextProvider : ISelectedTextProvider
         string text = string.Join(Environment.NewLine, selections.Select(range => range.GetText(-1)));
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
+
+    internal static bool IsPasswordPropertyValue(object? value) => value is true;
 }
