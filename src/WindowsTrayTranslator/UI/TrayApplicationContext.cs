@@ -136,7 +136,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             translationPopup.FallbackTranslationRequested += (_, request) =>
                 controller.RequestFallbackTranslation(request.OperationId);
             translationPopup.Dismissed += (_, dismissed) =>
-                controller.CancelReadTranslation(dismissed.OperationId);
+                controller.CancelTranslationInteraction(dismissed.OperationId);
             translationPopup.FormClosed += (_, _) => translationPopup = null;
         }
 

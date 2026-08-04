@@ -49,6 +49,11 @@ public sealed class SettingsForm : Form
     private readonly Button refreshModelsButton = new() { Text = "모델 목록 새로고침", AutoSize = true };
     private readonly CheckBox fallbackModelCheckBox = new() { Text = "기본 모델 실패 시 보조 모델 사용", AutoSize = true };
     private readonly ComboBox fallbackModelComboBox = CreateEditableCombo("gemini-3.1-flash-lite", "gemini-3.5-flash-lite");
+    private readonly CheckBox fallbackAfterCompletionCheckBox = new()
+    {
+        Text = "번역 완료 후 다른 모델로 다시 번역할 수 있게 표시",
+        AutoSize = true
+    };
 
     public SettingsForm(ApplicationController controller)
     {
@@ -73,7 +78,14 @@ public sealed class SettingsForm : Form
         ]);
         replaceFormatCombo.SelectedIndexChanged += (_, _) => UpdateReplaceFormatPreview();
         fallbackModelCheckBox.CheckedChanged += (_, _) =>
+        {
             fallbackModelComboBox.Enabled = fallbackModelCheckBox.Checked;
+            fallbackAfterCompletionCheckBox.Enabled = fallbackModelCheckBox.Checked;
+            if (!fallbackModelCheckBox.Checked)
+            {
+                fallbackAfterCompletionCheckBox.Checked = false;
+            }
+        };
 
         TabControl tabs = new()
         {
@@ -290,6 +302,7 @@ public sealed class SettingsForm : Form
         AddSectionRow(table, "안정성 옵션");
         AddFullRow(table, fallbackModelCheckBox);
         AddRow(table, "보조 모델", fallbackModelComboBox);
+        AddFullRow(table, fallbackAfterCompletionCheckBox);
         AddRow(table, "요청 제한 시간 (초)", requestTimeoutNumeric);
         AddRow(table, "일시 오류 재시도", transientRetryNumeric);
 
@@ -345,6 +358,8 @@ public sealed class SettingsForm : Form
         fallbackModelCheckBox.Checked = settings.Api.EnableFallbackModel;
         fallbackModelComboBox.Text = settings.Api.FallbackModel;
         fallbackModelComboBox.Enabled = fallbackModelCheckBox.Checked;
+        fallbackAfterCompletionCheckBox.Checked = settings.Api.OfferFallbackAfterCompletion;
+        fallbackAfterCompletionCheckBox.Enabled = fallbackModelCheckBox.Checked;
         RefreshSavedKeyLabel();
     }
 
@@ -404,7 +419,8 @@ public sealed class SettingsForm : Form
             RequestTimeoutSeconds = (int)requestTimeoutNumeric.Value,
             TransientRetryCount = (int)transientRetryNumeric.Value,
             EnableFallbackModel = fallbackModelCheckBox.Checked,
-            FallbackModel = fallbackModelComboBox.Text
+            FallbackModel = fallbackModelComboBox.Text,
+            OfferFallbackAfterCompletion = fallbackAfterCompletionCheckBox.Checked
         }
     };
 

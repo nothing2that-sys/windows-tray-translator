@@ -19,7 +19,29 @@ public sealed class ConfigurationServiceTests : IDisposable
         Assert.Equal("gemini-3.5-flash-lite", settings.Api.Model);
         Assert.Equal(5000, settings.General.ReadPopupTimeoutMs);
         Assert.Equal(5000, settings.General.ReplacePopupTimeoutMs);
+        Assert.False(settings.Api.OfferFallbackAfterCompletion);
         Assert.True(File.Exists(file));
+    }
+
+    [Fact]
+    public void Load_FallbackAfterCompletionOption_PreservesEnabledValue()
+    {
+        Directory.CreateDirectory(directory);
+        string file = Path.Combine(directory, "appsettings.json");
+        File.WriteAllText(file, """
+            {
+              "Api": {
+                "EnableFallbackModel": true,
+                "FallbackModel": "fallback-model",
+                "OfferFallbackAfterCompletion": true
+              }
+            }
+            """);
+
+        AppSettings settings = new ConfigurationService(file, new TestLogger()).Load();
+
+        Assert.True(settings.Api.EnableFallbackModel);
+        Assert.True(settings.Api.OfferFallbackAfterCompletion);
     }
 
     [Fact]

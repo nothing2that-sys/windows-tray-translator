@@ -50,4 +50,5 @@ public sealed class ApiSettings
     public int TransientRetryCount { get; set; } = 2;
     public bool EnableFallbackModel { get; set; }
     public string FallbackModel { get; set; } = "gemini-3.1-flash-lite";
+    public bool OfferFallbackAfterCompletion { get; set; }
 }
