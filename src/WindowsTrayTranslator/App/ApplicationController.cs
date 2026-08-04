@@ -26,10 +26,14 @@ public sealed class ApplicationController : IDisposable
     private readonly DpapiSecretStore secretStore;
     private readonly HttpClient httpClient;
     private readonly GeminiApiClient geminiClient;
+    private readonly GeminiTranslationProvider directTranslationProvider;
     private readonly StartupRegistrationService startupRegistration;
     private readonly TranslationHistoryStore historyStore;
     private readonly SemaphoreSlim operationGate = new(1, 1);
     private readonly CancellationTokenSource shutdown = new();
+    private readonly object readOperationSync = new();
+    private ReadTranslationOperation? activeReadOperation;
+    private long nextReadOperationId;
 
     public ApplicationController(
         AppPaths paths,
@@ -57,6 +61,7 @@ public sealed class ApplicationController : IDisposable
         secretStore = new DpapiSecretStore(paths.SecretFile);
         httpClient = new HttpClient();
         geminiClient = new GeminiApiClient(httpClient, logger);
+        directTranslationProvider = new GeminiTranslationProvider(geminiClient, secretStore, () => Settings);
         startupRegistration = new StartupRegistrationService(
             Environment.ProcessPath ?? Application.ExecutablePath);
         historyStore = new TranslationHistoryStore(
@@ -261,6 +266,7 @@ public sealed class ApplicationController : IDisposable
         try
         {
             bool isReadTranslation = hotkeyId == GlobalHotkeyService.ReadHotkeyId;
+            InvalidateActiveReadOperation();
             WindowIdentity sourceWindow = activeWindow.Capture();
             InputAccessResult access = inputAccess.Check(sourceWindow);
             if (!access.IsAllowed)
@@ -345,18 +351,72 @@ public sealed class ApplicationController : IDisposable
         string targetLanguage,
         CancellationToken cancellationToken)
     {
+        TranslationRequest request = new(originalText, targetLanguage);
+        CancellationTokenSource primaryCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        ReadTranslationOperation operation = new(
+            Interlocked.Increment(ref nextReadOperationId),
+            request,
+            Settings.Api.Model,
+            Settings.Api.FallbackModel,
+            primaryCancellation);
+        lock (readOperationSync)
+        {
+            activeReadOperation = operation;
+        }
+
         if (Settings.General.ShowTranslatingPopup)
         {
-            ShowPopup(true, TranslationPopupKind.Translating, "번역 중...");
+            ShowPopup(
+                true,
+                TranslationPopupKind.Translating,
+                "기본 모델에서 번역하고 있습니다…",
+                action: HasFallbackModel() ? TranslationPopupAction.SwitchToFallback : TranslationPopupAction.None,
+                operationId: operation.Id,
+                primaryModel: operation.PrimaryModel);
         }
-        TranslationResult translation = await TranslationProvider.TranslateAsync(
-            new TranslationRequest(originalText, targetLanguage),
-            cancellationToken);
+        TranslationResult translation = await directTranslationProvider.TranslateWithModelAsync(
+            request,
+            operation.PrimaryModel,
+            primaryCancellation.Token);
+
+        bool switchToFallback;
+        lock (readOperationSync)
+        {
+            if (!IsCurrentReadOperation(operation) || operation.Dismissed)
+            {
+                return;
+            }
+
+            operation.PrimaryInProgress = false;
+            switchToFallback = operation.SwitchToFallbackRequested;
+            if (translation.IsSuccess && !switchToFallback)
+            {
+                operation.PrimaryText = translation.TranslatedText;
+            }
+        }
+
+        if (switchToFallback)
+        {
+            await ExecuteFallbackTranslationAsync(operation, useAsPrimary: true);
+            return;
+        }
 
         if (!translation.IsSuccess)
         {
+            if (translation.FailureKind == TranslationFailureKind.Cancelled)
+            {
+                return;
+            }
+
             logger.Warning($"읽기 번역에 실패했습니다. Kind={translation.FailureKind}, Characters={originalText.Length}");
-            ShowPopup(true, TranslationPopupKind.Error, translation.ErrorMessage ?? "번역에 실패했습니다.");
+            ShowPopup(
+                true,
+                TranslationPopupKind.Error,
+                translation.ErrorMessage ?? "번역에 실패했습니다.",
+                action: HasFallbackModel() ? TranslationPopupAction.RetryFallback : TranslationPopupAction.None,
+                operationId: operation.Id,
+                primaryModel: operation.PrimaryModel);
             return;
         }
 
@@ -366,7 +426,233 @@ public sealed class ApplicationController : IDisposable
             targetLanguage,
             originalText,
             translation.TranslatedText!);
-        ShowPopup(true, TranslationPopupKind.Success, translation.TranslatedText!, translation.TranslatedText);
+        ShowPopup(
+            true,
+            TranslationPopupKind.Success,
+            translation.TranslatedText!,
+            translation.TranslatedText,
+            HasFallbackModel() ? TranslationPopupAction.ShowFallback : TranslationPopupAction.None,
+            operation.Id,
+            primaryModel: operation.PrimaryModel);
+    }
+
+    public void RequestFallbackTranslation(long operationId)
+    {
+        ReadTranslationOperation? operation;
+        bool cancelPrimary = false;
+        bool useAsPrimary = false;
+        lock (readOperationSync)
+        {
+            operation = activeReadOperation;
+            if (operation is null || operation.Id != operationId || operation.Dismissed ||
+                operation.FallbackInProgress || !HasFallbackModel())
+            {
+                return;
+            }
+
+            operation.FallbackInProgress = true;
+            if (operation.PrimaryInProgress)
+            {
+                operation.SwitchToFallbackRequested = true;
+                cancelPrimary = true;
+                useAsPrimary = true;
+            }
+            else
+            {
+                useAsPrimary = string.IsNullOrEmpty(operation.PrimaryText);
+            }
+        }
+
+        if (cancelPrimary)
+        {
+            ShowPopup(
+                true,
+                TranslationPopupKind.Translating,
+                "기본 모델 요청을 중단하고 백업 모델로 전환하고 있습니다…",
+                action: TranslationPopupAction.FallbackInProgress,
+                operationId: operation.Id,
+                primaryModel: operation.FallbackModel,
+                title: "백업 모델로 전환 중");
+            operation.PrimaryCancellation.Cancel();
+            return;
+        }
+
+        if (!useAsPrimary)
+        {
+            ShowPopup(
+                true,
+                TranslationPopupKind.Success,
+                operation.PrimaryText!,
+                operation.PrimaryText,
+                TranslationPopupAction.FallbackInProgress,
+                operation.Id,
+                secondaryMessage: "다른 번역을 만들고 있습니다…",
+                primaryModel: operation.PrimaryModel,
+                secondaryModel: operation.FallbackModel,
+                title: "번역 비교");
+        }
+        else
+        {
+            ShowPopup(
+                true,
+                TranslationPopupKind.Translating,
+                "백업 모델에서 다시 번역하고 있습니다…",
+                action: TranslationPopupAction.FallbackInProgress,
+                operationId: operation.Id,
+                primaryModel: operation.FallbackModel,
+                title: "백업 모델 번역 중");
+        }
+
+        _ = ExecuteFallbackTranslationAsync(operation, useAsPrimary);
+    }
+
+    public void CancelReadTranslation(long operationId)
+    {
+        ReadTranslationOperation? operation;
+        lock (readOperationSync)
+        {
+            operation = activeReadOperation;
+            if (operation is null || operation.Id != operationId)
+            {
+                return;
+            }
+
+            operation.Dismissed = true;
+        }
+
+        operation.PrimaryCancellation.Cancel();
+        operation.FallbackCancellation?.Cancel();
+    }
+
+    private async Task ExecuteFallbackTranslationAsync(
+        ReadTranslationOperation operation,
+        bool useAsPrimary)
+    {
+        using CancellationTokenSource fallbackCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token);
+        lock (readOperationSync)
+        {
+            if (!IsCurrentReadOperation(operation) || operation.Dismissed)
+            {
+                return;
+            }
+
+            operation.FallbackInProgress = true;
+            operation.FallbackCancellation = fallbackCancellation;
+        }
+
+        TranslationResult fallback = await directTranslationProvider.TranslateWithModelAsync(
+            operation.Request,
+            operation.FallbackModel,
+            fallbackCancellation.Token);
+
+        lock (readOperationSync)
+        {
+            if (!IsCurrentReadOperation(operation) || operation.Dismissed)
+            {
+                return;
+            }
+
+            operation.FallbackInProgress = false;
+            operation.FallbackCancellation = null;
+            if (fallback.IsSuccess)
+            {
+                operation.FallbackText = fallback.TranslatedText;
+            }
+        }
+
+        if (!fallback.IsSuccess)
+        {
+            if (fallback.FailureKind == TranslationFailureKind.Cancelled)
+            {
+                return;
+            }
+
+            logger.Warning($"백업 모델 번역에 실패했습니다. Kind={fallback.FailureKind}");
+            if (!useAsPrimary && !string.IsNullOrEmpty(operation.PrimaryText))
+            {
+                ShowPopup(
+                    true,
+                    TranslationPopupKind.Success,
+                    operation.PrimaryText,
+                    operation.PrimaryText,
+                    TranslationPopupAction.RetryFallback,
+                    operation.Id,
+                    secondaryMessage: $"백업 번역을 가져오지 못했습니다.\r\n{fallback.ErrorMessage ?? "잠시 후 다시 시도해 주세요."}",
+                    primaryModel: operation.PrimaryModel,
+                    secondaryModel: operation.FallbackModel,
+                    title: "번역 비교");
+            }
+            else
+            {
+                ShowPopup(
+                    true,
+                    TranslationPopupKind.Error,
+                    fallback.ErrorMessage ?? "백업 모델 번역에 실패했습니다.",
+                    action: TranslationPopupAction.RetryFallback,
+                    operationId: operation.Id,
+                    primaryModel: operation.FallbackModel,
+                    title: "백업 모델 응답 오류");
+            }
+            return;
+        }
+
+        if (useAsPrimary || string.IsNullOrEmpty(operation.PrimaryText))
+        {
+            logger.Information($"백업 모델로 읽기 번역을 완료했습니다. InputCharacters={operation.Request.OriginalText.Length}, OutputCharacters={fallback.TranslatedText!.Length}");
+            AddHistory(
+                TranslationHistoryKind.Read,
+                operation.Request.TargetLanguage,
+                operation.Request.OriginalText,
+                fallback.TranslatedText!);
+            ShowPopup(
+                true,
+                TranslationPopupKind.Success,
+                fallback.TranslatedText!,
+                fallback.TranslatedText,
+                operationId: operation.Id,
+                primaryModel: operation.FallbackModel,
+                title: "백업 모델 번역 완료");
+            return;
+        }
+
+        ShowPopup(
+            true,
+            TranslationPopupKind.Success,
+            operation.PrimaryText,
+            operation.PrimaryText,
+            operationId: operation.Id,
+            secondaryMessage: fallback.TranslatedText,
+            primaryModel: operation.PrimaryModel,
+            secondaryModel: operation.FallbackModel,
+            title: "번역 비교");
+    }
+
+    private bool HasFallbackModel() =>
+        Settings.Api.EnableFallbackModel &&
+        !string.IsNullOrWhiteSpace(Settings.Api.FallbackModel) &&
+        !string.Equals(Settings.Api.Model, Settings.Api.FallbackModel, StringComparison.OrdinalIgnoreCase) &&
+        !GeminiModelPolicy.IsKnownRetired(Settings.Api.FallbackModel);
+
+    private bool IsCurrentReadOperation(ReadTranslationOperation operation) =>
+        ReferenceEquals(activeReadOperation, operation);
+
+    private void InvalidateActiveReadOperation()
+    {
+        ReadTranslationOperation? previous;
+        lock (readOperationSync)
+        {
+            previous = activeReadOperation;
+            activeReadOperation = null;
+            if (previous is not null)
+            {
+                previous.Dismissed = true;
+            }
+        }
+
+        previous?.PrimaryCancellation.Cancel();
+        previous?.FallbackCancellation?.Cancel();
+        previous?.PrimaryCancellation.Dispose();
     }
 
     private async Task ExecuteReplaceTranslationAsync(
@@ -598,18 +884,31 @@ public sealed class ApplicationController : IDisposable
         bool isReadTranslation,
         TranslationPopupKind kind,
         string message,
-        string? copyText = null) =>
+        string? copyText = null,
+        TranslationPopupAction action = TranslationPopupAction.None,
+        long operationId = 0,
+        string? secondaryMessage = null,
+        string? primaryModel = null,
+        string? secondaryModel = null,
+        string? title = null) =>
         TranslationPopupRequested?.Invoke(this, new TranslationPopupRequestedEventArgs(
             kind,
             message,
             copyText,
             isReadTranslation
                 ? Settings.General.ReadPopupTimeoutMs
-                : Settings.General.ReplacePopupTimeoutMs));
+                : Settings.General.ReplacePopupTimeoutMs,
+            action,
+            operationId,
+            secondaryMessage,
+            primaryModel,
+            secondaryModel,
+            title));
 
     public void Dispose()
     {
         shutdown.Cancel();
+        InvalidateActiveReadOperation();
         hotkeys.Dispose();
         if (TranslationProvider is IDisposable disposableTranslationProvider)
         {
@@ -635,16 +934,58 @@ public enum TranslationPopupKind
     Error
 }
 
+public enum TranslationPopupAction
+{
+    None,
+    SwitchToFallback,
+    ShowFallback,
+    FallbackInProgress,
+    RetryFallback
+}
+
 public sealed class TranslationPopupRequestedEventArgs(
     TranslationPopupKind kind,
     string message,
     string? copyText,
-    int timeoutMs) : EventArgs
+    int timeoutMs,
+    TranslationPopupAction action = TranslationPopupAction.None,
+    long operationId = 0,
+    string? secondaryMessage = null,
+    string? primaryModel = null,
+    string? secondaryModel = null,
+    string? title = null) : EventArgs
 {
     public TranslationPopupKind Kind { get; } = kind;
     public string Message { get; } = message;
     public string? CopyText { get; } = copyText;
     public int TimeoutMs { get; } = timeoutMs;
+    public TranslationPopupAction Action { get; } = action;
+    public long OperationId { get; } = operationId;
+    public string? SecondaryMessage { get; } = secondaryMessage;
+    public string? PrimaryModel { get; } = primaryModel;
+    public string? SecondaryModel { get; } = secondaryModel;
+    public string? Title { get; } = title;
+}
+
+internal sealed class ReadTranslationOperation(
+    long id,
+    TranslationRequest request,
+    string primaryModel,
+    string fallbackModel,
+    CancellationTokenSource primaryCancellation)
+{
+    public long Id { get; } = id;
+    public TranslationRequest Request { get; } = request;
+    public string PrimaryModel { get; } = primaryModel;
+    public string FallbackModel { get; } = fallbackModel;
+    public CancellationTokenSource PrimaryCancellation { get; } = primaryCancellation;
+    public CancellationTokenSource? FallbackCancellation { get; set; }
+    public bool PrimaryInProgress { get; set; } = true;
+    public bool SwitchToFallbackRequested { get; set; }
+    public bool FallbackInProgress { get; set; }
+    public bool Dismissed { get; set; }
+    public string? PrimaryText { get; set; }
+    public string? FallbackText { get; set; }
 }
 
 public sealed class LanguageSelectionRequestedEventArgs(bool isReadTranslation = true, string recentLanguage = "Korean") : EventArgs

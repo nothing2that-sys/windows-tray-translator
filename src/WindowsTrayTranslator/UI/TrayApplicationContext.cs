@@ -13,7 +13,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem enabledItem;
     private SettingsForm? settingsForm;
     private TranslationHistoryForm? historyForm;
-    private TranslationPopupForm? translationPopup;
+    private TranslationResultPopupForm? translationPopup;
     private LanguageSelectionPopupForm? languageSelectionPopup;
 
     public TrayApplicationContext(ApplicationController controller, ILogger logger)
@@ -132,11 +132,15 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (translationPopup is null || translationPopup.IsDisposed)
         {
-            translationPopup = new TranslationPopupForm();
+            translationPopup = new TranslationResultPopupForm();
+            translationPopup.FallbackTranslationRequested += (_, request) =>
+                controller.RequestFallbackTranslation(request.OperationId);
+            translationPopup.Dismissed += (_, dismissed) =>
+                controller.CancelReadTranslation(dismissed.OperationId);
             translationPopup.FormClosed += (_, _) => translationPopup = null;
         }
 
-        translationPopup.ShowContent(e.Kind, e.Message, e.CopyText, e.TimeoutMs);
+        translationPopup.ShowContent(e);
     }
 
     private void OnSettingsApplied(object? sender, EventArgs e)

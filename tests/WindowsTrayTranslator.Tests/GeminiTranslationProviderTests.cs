@@ -39,6 +39,37 @@ public sealed class GeminiTranslationProviderTests
         Assert.Equal(["primary-model", "fallback-model"], models);
     }
 
+    [Fact]
+    public async Task TranslateWithModelAsync_UsesOnlyRequestedModel()
+    {
+        List<string> models = [];
+        HttpClient httpClient = new(new Handler(request =>
+        {
+            models.Add(request.RequestUri!.Segments[^1].Split(':')[0]);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"다른 번역\"}]}}]}")
+            };
+        }));
+        AppSettings settings = new();
+        settings.Api.Model = "primary-model";
+        settings.Api.EnableFallbackModel = true;
+        settings.Api.FallbackModel = "fallback-model";
+        GeminiTranslationProvider provider = new(
+            new GeminiApiClient(httpClient, new TestLogger()),
+            new FakeSecretStore(),
+            () => settings);
+
+        TranslationResult result = await provider.TranslateWithModelAsync(
+            new TranslationRequest("Hello", "Korean"),
+            "manually-selected-model",
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("다른 번역", result.TranslatedText);
+        Assert.Equal(["manually-selected-model"], models);
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

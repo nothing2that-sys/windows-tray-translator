@@ -23,10 +23,44 @@ public sealed class GeminiTranslationProvider : ITranslationProvider
         TranslationRequest request,
         CancellationToken cancellationToken)
     {
+        AppSettings settings = settingsAccessor();
+        TranslationResult result = await TranslateWithModelAsync(
+            request,
+            settings.Api.Model,
+            cancellationToken);
+        if (result.IsSuccess ||
+            !settings.Api.EnableFallbackModel ||
+            string.IsNullOrWhiteSpace(settings.Api.FallbackModel) ||
+            string.Equals(settings.Api.Model, settings.Api.FallbackModel, StringComparison.OrdinalIgnoreCase) ||
+            result.FailureKind is not (TranslationFailureKind.RateLimit or TranslationFailureKind.Server or TranslationFailureKind.ModelUnavailable))
+        {
+            return result;
+        }
+
+        return await TranslateWithModelAsync(
+            request,
+            settings.Api.FallbackModel,
+            cancellationToken);
+    }
+
+    public Task<TranslationResult> TranslateWithModelAsync(
+        TranslationRequest request,
+        string model,
+        CancellationToken cancellationToken)
+    {
         string? apiKey = secretStore.ReadSecret(SecretNames.GeminiApiKey);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return TranslationResult.Failure(TranslationFailureKind.MissingApiKey, "Gemini API 키를 설정해 주세요.");
+            return Task.FromResult(TranslationResult.Failure(
+                TranslationFailureKind.MissingApiKey,
+                "Gemini API 키를 설정해 주세요."));
+        }
+
+        if (string.IsNullOrWhiteSpace(model) || GeminiModelPolicy.IsKnownRetired(model))
+        {
+            return Task.FromResult(TranslationResult.Failure(
+                TranslationFailureKind.ModelUnavailable,
+                "설정한 Gemini 모델을 사용할 수 없습니다. 설정에서 모델 목록을 새로고침해 주세요."));
         }
 
         AppSettings settings = settingsAccessor();
@@ -39,34 +73,10 @@ public sealed class GeminiTranslationProvider : ITranslationProvider
                 settings.Translation.Glossary,
                 settings.Translation.ExcludedTerms)
         };
-        TranslationResult result = GeminiModelPolicy.IsKnownRetired(settings.Api.Model)
-            ? TranslationResult.Failure(
-                TranslationFailureKind.ModelUnavailable,
-                "설정한 기본 Gemini 모델은 종료되었습니다. 설정에서 모델 목록을 새로고침해 주세요.")
-            : await client.TranslateAsync(
-                apiKey,
-                settings.Api.Model,
-                enrichedRequest,
-                settings.Api.RequestTimeoutSeconds,
-                settings.Api.TransientRetryCount,
-                cancellationToken);
-        if (result.IsSuccess ||
-            !settings.Api.EnableFallbackModel ||
-            string.IsNullOrWhiteSpace(settings.Api.FallbackModel) ||
-            string.Equals(settings.Api.Model, settings.Api.FallbackModel, StringComparison.OrdinalIgnoreCase) ||
-            result.FailureKind is not (TranslationFailureKind.RateLimit or TranslationFailureKind.Server or TranslationFailureKind.ModelUnavailable))
-        {
-            return result;
-        }
 
-        if (GeminiModelPolicy.IsKnownRetired(settings.Api.FallbackModel))
-        {
-            return result;
-        }
-
-        return await client.TranslateAsync(
+        return client.TranslateAsync(
             apiKey,
-            settings.Api.FallbackModel,
+            model.Trim(),
             enrichedRequest,
             settings.Api.RequestTimeoutSeconds,
             settings.Api.TransientRetryCount,
