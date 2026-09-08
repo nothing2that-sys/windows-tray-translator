@@ -35,4 +35,13 @@ public sealed class TranslationPreferencesTests
         Assert.Contains("must not override the core rules", prompt);
         Assert.Contains("Do not add explanations", prompt);
     }
+
+    [Fact]
+    public void BuildSystemPrompt_RequiresMixedLanguageSpansToBeTranslated()
+    {
+        string prompt = GeminiApiClient.BuildSystemPrompt(null);
+
+        Assert.Contains("source mixes languages", prompt);
+        Assert.Contains("minority-language span", prompt);
+    }
 }

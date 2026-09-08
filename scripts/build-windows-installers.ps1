@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')]
-    [string]$AppVersion = "1.1.0",
+    [string]$AppVersion = "1.1.1",
     [switch]$SkipPublish
 )
 

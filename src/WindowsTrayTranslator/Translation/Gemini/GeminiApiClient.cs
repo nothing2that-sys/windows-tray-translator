@@ -14,6 +14,7 @@ public sealed class GeminiApiClient
 
         Rules:
         Return only the translated text.
+        When the source mixes languages, translate every translatable span so the complete result reads naturally in the requested target language. Do not leave a minority-language span untranslated merely because the surrounding text is already in the target language.
         Do not add explanations, introductions, quotation marks, markdown, or code fences.
         Preserve line breaks, URLs, email addresses, usernames, mentions, numbers, file paths, and emojis.
         When the source contains markers such as ⟦WTT-LINE-000001⟧, copy every marker exactly once and in the same order.

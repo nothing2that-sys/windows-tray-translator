@@ -234,7 +234,7 @@ public sealed class SettingsForm : Form
         {
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
-            Text = "Select: 단축키를 누를 때 언어 선택 / Auto: 한국어는 영어로, 그 외 언어는 한국어로 번역"
+            Text = "Select: 단축키를 누를 때 언어 선택 / Auto: 주 언어가 한국어면 영어로, 그 외에는 한국어로 번역"
         });
         AddRow(table, "작성 대상 언어", replaceLanguageCombo);
         AddFullRow(table, new Label
