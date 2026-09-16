@@ -120,7 +120,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     private static void ShowAbout() => MessageBox.Show(
-        "Gemini 기반 Windows 번역 도우미\n\nAlt+R  읽기 번역\nAlt+T  작성 번역\n\n.NET 8 · 구현 범위 Phase 1~7",
+        $"Gemini 기반 Windows 번역 도우미\n\nAlt+R  읽기 번역\nAlt+T  작성 번역\n\nVersion {Application.ProductVersion} · .NET 10",
         "Windows Tray Translator",
         MessageBoxButtons.OK,
         MessageBoxIcon.Information);

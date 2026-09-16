@@ -20,6 +20,8 @@ public sealed class ConfigurationServiceTests : IDisposable
         Assert.Equal(5000, settings.General.ReadPopupTimeoutMs);
         Assert.Equal(5000, settings.General.ReplacePopupTimeoutMs);
         Assert.False(settings.Api.OfferFallbackAfterCompletion);
+        Assert.False(settings.General.EnableTranslationHistory);
+        Assert.Equal(30, settings.General.HistoryRetentionDays);
         Assert.True(File.Exists(file));
     }
 
@@ -51,7 +53,7 @@ public sealed class ConfigurationServiceTests : IDisposable
         string file = Path.Combine(directory, "appsettings.json");
         File.WriteAllText(file, """
             {
-              "General": { "PopupTimeoutMs": -1, "LogRetentionDays": 1000 },
+              "General": { "PopupTimeoutMs": -1, "LogRetentionDays": 1000, "HistoryRetentionDays": 0 },
               "Translation": { "MaxInputCharacters": 0, "ReadHotkey": "R", "ReplaceHotkey": "Alt+T", "ReplaceFormat": "999" },
               "Api": { "Model": "", "RequestTimeoutSeconds": 999 }
             }
@@ -63,6 +65,7 @@ public sealed class ConfigurationServiceTests : IDisposable
         Assert.Equal(1000, settings.General.ReadPopupTimeoutMs);
         Assert.Equal(1000, settings.General.ReplacePopupTimeoutMs);
         Assert.Equal(365, settings.General.LogRetentionDays);
+        Assert.Equal(1, settings.General.HistoryRetentionDays);
         Assert.Equal(1, settings.Translation.MaxInputCharacters);
         Assert.Equal("Alt+R", settings.Translation.ReadHotkey);
         Assert.Equal("TranslationWithOriginal", settings.Translation.ReplaceFormat);

@@ -20,6 +20,7 @@ public static class SettingsValidator
             ? settings.General.PopupTimeoutMs
             : Math.Clamp(settings.General.ReplacePopupTimeoutMs, 1000, 60000);
         settings.General.LogRetentionDays = Math.Clamp(settings.General.LogRetentionDays, 1, 365);
+        settings.General.HistoryRetentionDays = Math.Clamp(settings.General.HistoryRetentionDays, 1, 365);
         settings.Translation.MaxInputCharacters = Math.Clamp(settings.Translation.MaxInputCharacters, 1, 100000);
         settings.Translation.ClipboardCopyTimeoutMs = Math.Clamp(settings.Translation.ClipboardCopyTimeoutMs, 100, 10000);
         settings.Translation.ClipboardRestoreDelayMs = Math.Clamp(settings.Translation.ClipboardRestoreDelayMs, 50, 5000);

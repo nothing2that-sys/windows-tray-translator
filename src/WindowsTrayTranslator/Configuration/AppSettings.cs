@@ -18,6 +18,8 @@ public sealed class GeneralSettings
     public int ReplacePopupTimeoutMs { get; set; } = -1;
     public bool EnableLogging { get; set; } = true;
     public int LogRetentionDays { get; set; } = 14;
+    public bool EnableTranslationHistory { get; set; }
+    public int HistoryRetentionDays { get; set; } = 30;
 }
 
 public sealed class TranslationSettings

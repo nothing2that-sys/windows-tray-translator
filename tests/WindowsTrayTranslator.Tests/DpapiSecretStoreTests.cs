@@ -22,6 +22,17 @@ public sealed class DpapiSecretStoreTests : IDisposable
         Assert.False(store.HasSecret(SecretNames.GeminiApiKey));
     }
 
+    [Fact]
+    public void Operations_WithUnknownKeyName_AreRejected()
+    {
+        DpapiSecretStore store = new(Path.Combine(directory, "secrets.dat"));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.WriteSecret("OtherKey", "value"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.ReadSecret("OtherKey"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.DeleteSecret("OtherKey"));
+        Assert.False(store.HasSecret("OtherKey"));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory))

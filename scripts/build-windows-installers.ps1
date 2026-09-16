@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')]
-    [string]$AppVersion = "1.1.1",
+    [string]$AppVersion = (& (Join-Path $PSScriptRoot "Get-ReleaseVersion.ps1")),
     [switch]$SkipPublish
 )
 

@@ -1,5 +1,7 @@
 # Windows Tray Translator 구현 명세서
 
+> Historical design record: 이 문서는 초기 .NET 8 구현 당시의 개발 기록입니다. 현재 공개 빌드/런타임 계약은 root `README.md`, `PRIVACY.md`, `Directory.Build.props`와 실제 source를 기준으로 합니다.
+
 ## 1. 문서 목적
 
 이 문서는 Windows 환경에서 선택한 문자열을 단축키로 번역하는 트레이 상주형 프로그램의 구현 기준을 정의한다.

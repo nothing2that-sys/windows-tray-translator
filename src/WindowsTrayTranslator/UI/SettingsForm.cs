@@ -12,10 +12,12 @@ public sealed class SettingsForm : Form
     private readonly CheckBox translationEnabledCheckBox = new() { Text = "번역 기능 활성화", AutoSize = true };
     private readonly CheckBox startupCheckBox = new() { Text = "Windows 시작 시 자동 실행", AutoSize = true };
     private readonly CheckBox translatingPopupCheckBox = new() { Text = "번역 중 상태 팝업 표시", AutoSize = true };
-    private readonly CheckBox loggingCheckBox = new() { Text = "로그 기록 활성화", AutoSize = true };
+    private readonly CheckBox loggingCheckBox = new() { Text = "진단 로그 기록 활성화 (번역 원문/결과 제외)", AutoSize = true };
+    private readonly CheckBox historyCheckBox = new() { Text = "번역 히스토리 저장 (원문과 번역문 포함, 기본 꺼짐)", AutoSize = true };
     private readonly NumericUpDown readPopupTimeoutNumeric = CreateNumeric(1000, 60000, 1000);
     private readonly NumericUpDown replacePopupTimeoutNumeric = CreateNumeric(1000, 60000, 1000);
     private readonly NumericUpDown logRetentionNumeric = CreateNumeric(1, 365);
+    private readonly NumericUpDown historyRetentionNumeric = CreateNumeric(1, 365);
 
     private readonly ComboBox readLanguageCombo = CreateEditableCombo("Select", "Auto", "Korean", "English", "Japanese", "Chinese (Simplified)", "Vietnamese");
     private readonly ComboBox replaceLanguageCombo = CreateEditableCombo("Select", "English", "Korean", "Japanese", "Chinese (Simplified)", "Vietnamese");
@@ -221,7 +223,9 @@ public sealed class SettingsForm : Form
         AddRow(table, "읽기 팝업 자동 닫기 (ms)", readPopupTimeoutNumeric);
         AddRow(table, "작성 팝업 자동 닫기 (ms)", replacePopupTimeoutNumeric);
         AddFullRow(table, loggingCheckBox);
-        AddRow(table, "로그 보존 기간 (일)", logRetentionNumeric);
+        AddRow(table, "진단 로그 보존 기간 (일)", logRetentionNumeric);
+        AddFullRow(table, historyCheckBox);
+        AddRow(table, "히스토리 보존 기간 (일)", historyRetentionNumeric);
         return WrapTab("일반", table);
     }
 
@@ -330,6 +334,8 @@ public sealed class SettingsForm : Form
         replacePopupTimeoutNumeric.Value = settings.General.ReplacePopupTimeoutMs;
         loggingCheckBox.Checked = settings.General.EnableLogging;
         logRetentionNumeric.Value = settings.General.LogRetentionDays;
+        historyCheckBox.Checked = settings.General.EnableTranslationHistory;
+        historyRetentionNumeric.Value = settings.General.HistoryRetentionDays;
 
         readLanguageCombo.Text = settings.Translation.ReadTargetLanguage;
         replaceLanguageCombo.Text = settings.Translation.ReplaceTargetLanguage;
@@ -389,7 +395,9 @@ public sealed class SettingsForm : Form
             ReadPopupTimeoutMs = (int)readPopupTimeoutNumeric.Value,
             ReplacePopupTimeoutMs = (int)replacePopupTimeoutNumeric.Value,
             EnableLogging = loggingCheckBox.Checked,
-            LogRetentionDays = (int)logRetentionNumeric.Value
+            LogRetentionDays = (int)logRetentionNumeric.Value,
+            EnableTranslationHistory = historyCheckBox.Checked,
+            HistoryRetentionDays = (int)historyRetentionNumeric.Value
         },
         Translation = new TranslationSettings
         {

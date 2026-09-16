@@ -1,16 +1,16 @@
 # Windows Tray Translator
 
-.NET 8 WinForms 기반의 Windows 트레이 상주형 Gemini 번역 애플리케이션입니다.
+Windows에서 텍스트를 선택한 뒤 단축키만 누르면 Gemini로 즉시 번역하거나 선택한 문장을 번역문으로 교체할 수 있는 Windows Tray Utility입니다.
 
 처음 사용하는 경우 UI 화면과 단계별 설명을 포함한 [사용자 매뉴얼](doc/WindowsTrayTranslator_UserManual.html)을 참고하세요.
 
-Phase 1~7 구현을 완료했습니다. 트레이 실행, 번역과 안전한 자동 치환, 통합 설정 UI, 단축키 즉시 재등록, Windows 시작 프로그램 등록, self-contained 단일 파일 배포를 제공합니다.
+트레이 실행, 번역과 안전한 자동 치환, 통합 설정 UI, 단축키 즉시 재등록, Windows 시작 프로그램 등록, self-contained 단일 파일 배포를 제공합니다.
 
 ## 요구 환경
 
-- 개발: Windows 10/11 x64, .NET SDK 9 이상
-- 실행: Windows 10/11 x64
-- 대상 런타임: .NET 8
+- 개발: Windows 11 x64 또는 Microsoft가 .NET 10을 지원하는 Windows 환경, .NET 10 SDK (`global.json` 참조)
+- 실행: Windows 11 x64. Windows 10은 Microsoft의 [.NET supported OS policy](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)에 포함된 edition만 지원 후보이며 RC 수동 검증이 필요합니다.
+- 대상 런타임: .NET 10
 
 ## 기본 단축키
 
@@ -34,13 +34,13 @@ Phase 1~7 구현을 완료했습니다. 트레이 실행, 번역과 안전한 �
 
 트레이 아이콘을 더블클릭하거나 우클릭 후 `설정 열기`를 선택합니다.
 
-- 일반: 번역 활성화, Windows 자동 시작, 읽기·작성별 팝업 자동 닫기, 로그 설정
+- 일반: 번역 활성화, Windows 자동 시작, 읽기·작성별 팝업 자동 닫기, 진단 로그와 번역 히스토리 설정
 - 번역: 대상 언어, 작성 결과 형식, 읽기·작성 단축키, 클립보드 설정
 - API: Gemini 키와 모델, 모델 목록 조회, 보조 모델, 요청 제한 시간, 재시도, 연결 테스트
 
 새 단축키가 다른 프로그램과 충돌하면 저장하지 않고 기존 두 단축키를 복구합니다. `Windows 시작 시 자동 실행`은 현재 사용자 계정의 시작 프로그램에 등록되며 설정을 해제하면 제거됩니다.
 
-트레이 메뉴의 `번역 히스토리`에서는 최근 읽기·작성 번역의 시간, 대상 언어, 원문과 번역문을 확인하고 번역문을 다시 복사할 수 있습니다. 히스토리는 로그 기록이 활성화된 동안 로그 보존 기간에 맞춰 일자별로 저장됩니다.
+트레이 메뉴의 `번역 히스토리`에서는 최근 읽기·작성 번역의 시간, 대상 언어, 원문과 번역문을 확인하고 번역문을 다시 복사할 수 있습니다. 히스토리는 기본적으로 꺼져 있으며, 사용자가 `번역 히스토리 저장`을 명시적으로 켠 경우에만 별도 `history` 폴더에 보존됩니다.
 
 읽기 대상 언어는 `Select`, `Auto`, 한국어, 영어, 일본어, 중국어(간체), 베트남어를 제공하고, 작성 대상 언어는 `Select`와 각 개별 언어를 제공합니다. 읽기에서 `Auto`를 설정하면 앱이 기술 식별자를 제외한 자연어 단어의 비중으로 원문의 주 언어를 판정하여 한국어 우세 문장은 영어로, 그 외 문장은 한국어로 번역합니다. 일부 단어나 인용구만 다른 언어인 혼합 문장도 전체 문맥을 유지한 채 대상 언어로 번역합니다. `Select`를 설정하면 단축키를 누를 때 포커스를 빼앗지 않는 언어 선택 팝업이 나타나며, 고른 언어로 번역을 진행합니다. 작성 결과 형식은 설정 화면의 한글 설명과 예시를 보고 선택할 수 있습니다.
 
@@ -63,7 +63,7 @@ API 탭의 `모델 목록 새로고침`은 현재 API 키에서 `generateContent
 3. `API` 탭에 키와 모델명을 입력합니다. 번역용 기본 모델은 `gemini-3.5-flash-lite`입니다.
 4. `API 연결 테스트`로 확인한 뒤 `저장`을 누릅니다.
 
-API 키는 설정 JSON에 저장되지 않습니다. `%LOCALAPPDATA%\WindowsTrayTranslator\secrets.dat`에 Windows DPAPI CurrentUser 범위로 암호화하여 저장합니다. 일반 운영 로그에는 선택 문자열과 번역 결과를 기록하지 않지만, 로그 기록이 활성화된 경우 번역 히스토리 기능을 위해 원문과 번역문을 `logs\history-날짜.jsonl`에 저장합니다.
+API 키는 설정 JSON에 저장되지 않습니다. `%LOCALAPPDATA%\WindowsTrayTranslator\secrets.dat`에 Windows DPAPI CurrentUser 범위로 암호화하여 저장합니다. 진단 로그에는 선택 문자열과 번역 결과를 기록하지 않습니다. 번역 원문과 결과는 사용자가 히스토리를 켠 경우에만 `history\history-날짜.jsonl`에 저장됩니다. 자세한 내용은 [PRIVACY.md](PRIVACY.md)를 확인하세요.
 
 선택 문자열은 Gemini API로 전송됩니다. 회사 기밀, 개인정보 또는 전송이 금지된 내용을 번역하지 마십시오.
 
@@ -79,45 +79,23 @@ dotnet test WindowsTrayTranslator.sln -c Release --no-build
 
 ## 배포
 
-```powershell
-dotnet publish src/WindowsTrayTranslator/WindowsTrayTranslator.csproj `
-  -c Release `
-  -r win-x64 `
-  --self-contained true `
-  -p:PublishSingleFile=true `
-  -p:IncludeNativeLibrariesForSelfExtract=true `
-  -p:PublishTrimmed=false `
-  -p:DebugType=None `
-  -p:DebugSymbols=false `
-  -o artifacts/publish/win-x64
-```
-
-또는 `scripts\publish-windows-x64.bat`을 실행합니다. 스크립트는 기존 출력 폴더를 정리한 다음 self-contained 단일 EXE인지 검사하고 SHA-256 해시를 출력합니다.
-
-런타임 포함·미포함 패키지를 한 번에 만들려면 다음 스크립트를 실행합니다.
+Inno Setup 6가 설치된 Windows에서 아래 canonical scripts를 실행합니다.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\publish-windows-x64-all.ps1
+./scripts/build.ps1
+./scripts/test.ps1
+./scripts/package-release.ps1 -NoRestore
 ```
 
-생성 위치:
+`Directory.Build.props`의 Version을 기준으로 `artifacts\release\<version>` 아래에 공개용 파일 3개를 생성합니다.
 
 ```text
-dist\windows-x64\
-├── WindowsTrayTranslator-win-x64-self-contained.zip
-├── WindowsTrayTranslator-win-x64-framework-dependent.zip
-├── README.md
-└── SHA256SUMS.txt
+WindowsTrayTranslator-Setup-1.2.0-x64.exe
+WindowsTrayTranslator-Portable-1.2.0-x64.zip
+SHA256SUMS.txt
 ```
 
-- `self-contained`: .NET 런타임 포함. 별도 런타임 설치 없이 실행할 수 있습니다.
-
-설치된 앱 등록, 시작 메뉴 바로가기, 제거 프로그램을 포함한 설치 파일 2종은
-Inno Setup 6를 설치한 뒤 다음 명령으로 생성합니다.
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-windows-installers.ps1
-```
+Portable ZIP과 Installer는 .NET 10 Windows x64 Runtime을 포함합니다. framework-dependent 산출물은 Public Release 기본 대상에서 제외합니다.
 
 설치 마법사의 `추가 작업` 화면에서 사용자가 다음 항목을 각각 선택할 수 있습니다.
 
@@ -129,18 +107,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-windows-installers.ps1
 설정, API 키, 로그 및 번역 히스토리는 설치 폴더와 분리된
 `%LOCALAPPDATA%\WindowsTrayTranslator`에 유지됩니다.
 
-현재 자동 생성되는 설치 파일에는 코드 서명 인증서가 적용되지 않습니다.
-외부 배포 시 Windows SmartScreen 경고를 줄이려면 별도의 코드 서명 인증서로
-최종 설치 파일에 서명해야 합니다.
-- `framework-dependent`: .NET 8 Desktop Runtime 미포함. 파일은 작지만 대상 PC에 해당 런타임이 필요합니다.
-
-최종 산출물:
-
-```text
-artifacts\publish\win-x64\WindowsTrayTranslator.exe
-```
-
-이 EXE에는 .NET 8 Windows x64 런타임이 포함됩니다. 배포 전 실제 프로그램별 검증은 [Phase 7 수동 검증 체크리스트](doc/Phase7_ManualTestChecklist.md)를 사용합니다.
+현재 자동 생성되는 설치 파일에는 코드 서명 인증서가 적용되지 않습니다. 배포 전 실제 프로그램별 검증은 [수동 검증 체크리스트](doc/Phase7_ManualTestChecklist.md)를 사용합니다.
 
 ## 런타임 데이터
 
@@ -148,7 +115,8 @@ artifacts\publish\win-x64\WindowsTrayTranslator.exe
 %LOCALAPPDATA%\WindowsTrayTranslator\
 ├── config\appsettings.json
 ├── secrets.dat
-└── logs\
+├── logs\
+└── history\
 ```
 
 ## 현재 제한사항
@@ -157,3 +125,21 @@ artifacts\publish\win-x64\WindowsTrayTranslator.exe
 - 일부 지연 렌더링 또는 앱 전용 클립보드 형식은 안전하게 백업할 수 없습니다. 이 경우 원본 보호를 위해 캡처를 취소합니다.
 - 현재 프로그램보다 높은 권한으로 실행된 프로그램에는 `SendInput`이 차단될 수 있습니다.
 - 관리자 권한 대상은 가능한 경우 번역 전에 감지해 클립보드와 선택 영역을 변경하지 않습니다. Windows가 권한 조회를 허용하지 않는 예외적인 경우에는 `SendInput` 실패 안내가 최종 보호 수단입니다.
+
+## Public release
+
+공개 전환과 독립 검증이 끝난 뒤 GitHub Releases에는 self-contained Installer, Portable ZIP, `SHA256SUMS.txt`만 제공합니다. 현재 설치 프로그램은 코드 서명되지 않아 Windows SmartScreen 경고가 표시될 수 있습니다.
+
+Version `1.2.0`의 canonical packaging 명령은 다음과 같습니다.
+
+```powershell
+./scripts/build.ps1
+./scripts/test.ps1
+./scripts/package-release.ps1 -NoRestore
+```
+
+`v1.2.0` 형식의 tag workflow는 tag와 `Directory.Build.props` version의 일치를 확인하고 Draft Release를 생성합니다. Repository Public 전환과 Release 공개 게시는 별도 승인 작업입니다.
+
+## Security and license
+
+취약점은 공개 Issue 대신 [SECURITY.md](SECURITY.md)의 비공개 절차로 신고해 주세요. 이 프로젝트는 [MIT License](LICENSE)로 배포되며 외부 구성 요소는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요.

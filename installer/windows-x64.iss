@@ -7,7 +7,7 @@
 #endif
 
 #ifndef AppVersion
-  #define AppVersion "1.1.1"
+  #error AppVersion must be supplied by the build script.
 #endif
 
 #ifndef OutputBaseFilename

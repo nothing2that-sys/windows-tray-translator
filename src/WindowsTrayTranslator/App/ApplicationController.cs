@@ -65,9 +65,9 @@ public sealed class ApplicationController : IDisposable
         startupRegistration = new StartupRegistrationService(
             Environment.ProcessPath ?? Application.ExecutablePath);
         historyStore = new TranslationHistoryStore(
-            paths.LogDirectory,
-            settings.General.EnableLogging,
-            settings.General.LogRetentionDays,
+            paths.HistoryDirectory,
+            settings.General.EnableTranslationHistory,
+            settings.General.HistoryRetentionDays,
             logger);
         hotkeys = new GlobalHotkeyService(OnHotkeyPressed, logger);
         try
@@ -170,7 +170,9 @@ public sealed class ApplicationController : IDisposable
             {
                 fileLogger.Configure(Settings.General.EnableLogging, Settings.General.LogRetentionDays);
             }
-            historyStore.Configure(Settings.General.EnableLogging, Settings.General.LogRetentionDays);
+            historyStore.Configure(
+                Settings.General.EnableTranslationHistory,
+                Settings.General.HistoryRetentionDays);
 
             logger.Information("설정을 저장하고 즉시 적용했습니다.");
         }
@@ -923,6 +925,8 @@ public sealed class ApplicationController : IDisposable
         target.General.ReplacePopupTimeoutMs = source.General.ReplacePopupTimeoutMs;
         target.General.EnableLogging = source.General.EnableLogging;
         target.General.LogRetentionDays = source.General.LogRetentionDays;
+        target.General.EnableTranslationHistory = source.General.EnableTranslationHistory;
+        target.General.HistoryRetentionDays = source.General.HistoryRetentionDays;
 
         target.Translation.ReadTargetLanguage = source.Translation.ReadTargetLanguage;
         target.Translation.ReplaceTargetLanguage = source.Translation.ReplaceTargetLanguage;

@@ -117,11 +117,11 @@ public sealed class TranslationHistoryForm : Form
         historyGrid.Columns.Add("Target", "대상 언어");
         historyGrid.Columns.Add("Original", "원문");
         historyGrid.Columns.Add("Translation", "번역문");
-        historyGrid.Columns["Time"].FillWeight = 85;
-        historyGrid.Columns["Kind"].FillWeight = 40;
-        historyGrid.Columns["Target"].FillWeight = 60;
-        historyGrid.Columns["Original"].FillWeight = 130;
-        historyGrid.Columns["Translation"].FillWeight = 130;
+        historyGrid.Columns["Time"]!.FillWeight = 85;
+        historyGrid.Columns["Kind"]!.FillWeight = 40;
+        historyGrid.Columns["Target"]!.FillWeight = 60;
+        historyGrid.Columns["Original"]!.FillWeight = 130;
+        historyGrid.Columns["Translation"]!.FillWeight = 130;
         historyGrid.SelectionChanged += (_, _) => ShowDetails(SelectedEntry);
     }
 

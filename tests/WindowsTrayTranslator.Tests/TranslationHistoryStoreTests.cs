@@ -45,6 +45,22 @@ public sealed class TranslationHistoryStoreTests : IDisposable
         Assert.Empty(store.LoadRecent());
     }
 
+    [Fact]
+    public void LoadRecent_WhenJsonlContainsDamagedLine_SkipsOnlyDamagedEntry()
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "history-2026-07-22.jsonl"),
+            "{not-json}" + Environment.NewLine +
+            "{\"timestamp\":\"2026-07-22T11:00:00+00:00\",\"kind\":1,\"targetLanguage\":\"Korean\",\"originalText\":\"Hello\",\"translatedText\":\"안녕하세요\"}" + Environment.NewLine);
+        TranslationHistoryStore store = new(directory, enabled: true, retentionDays: 14, new TestLogger());
+
+        TranslationHistoryEntry entry = Assert.Single(store.LoadRecent());
+
+        Assert.Equal("Hello", entry.OriginalText);
+        Assert.Equal("안녕하세요", entry.TranslatedText);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory))
