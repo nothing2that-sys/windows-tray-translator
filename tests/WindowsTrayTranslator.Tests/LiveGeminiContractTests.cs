@@ -52,21 +52,41 @@ public sealed class LiveGeminiContractTests
             secrets,
             () => settings);
 
+        // Back-to-back requests hit 429 and silently shrink the sample, so pace them.
+        int delayMs = ReadInt("WTT_LIVE_DELAY_MS", 1500);
+
         List<Observation> observations = [];
         for (int index = 1; index <= iterations; index++)
         {
+            if (index > 1)
+            {
+                await Task.Delay(delayMs);
+            }
+
             TranslationResult result = await provider.GenerateAsync(
                 PromptComposer.Compose(kind, input),
                 CancellationToken.None);
+
+            // One retry after a rate limit, so a throttled call does not cost a sample.
+            if (!result.IsSuccess && result.FailureKind == TranslationFailureKind.RateLimit)
+            {
+                await Task.Delay(ReadInt("WTT_LIVE_RATELIMIT_BACKOFF_MS", 20000));
+                result = await provider.GenerateAsync(
+                    PromptComposer.Compose(kind, input),
+                    CancellationToken.None);
+            }
+
             observations.Add(Observation.From(index, input, result));
         }
 
         string reportPath = WriteReport(kind, input, observations, settings.Api.Model);
 
+        // A shrunken sample must not look like a pass: the rates below are computed over successes
+        // only, so require most of the planned iterations to have produced a real answer.
         int succeeded = observations.Count(o => o.IsSuccess);
         Assert.True(
-            succeeded > 0,
-            $"모든 요청이 실패했습니다. 보고서: {reportPath}");
+            succeeded >= Math.Max(5, (int)(iterations * 0.8)),
+            $"성공 표본이 부족해 판정할 수 없습니다: {succeeded}/{iterations}. 보고서: {reportPath}");
 
         // G5 - a leaked internal marker is a defect we control, so it must never happen.
         Assert.Equal(0, observations.Count(o => o.HasMarker));

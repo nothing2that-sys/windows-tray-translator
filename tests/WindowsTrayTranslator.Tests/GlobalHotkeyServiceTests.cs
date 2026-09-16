@@ -48,6 +48,39 @@ public sealed class GlobalHotkeyServiceTests
         Assert.False(registrar.Registered.ContainsKey(GlobalHotkeyService.ActionPaletteHotkeyId));
     }
 
+    /// <summary>
+    /// A real startup with an occupied Ctrl+Alt+A logged only the failure, so there was no way to
+    /// tell from the log whether Alt+R and Alt+T had registered. The summary must state every key.
+    /// </summary>
+    [Fact]
+    public void RegisterStartup_LogsOutcomeForEveryHotkey()
+    {
+        FakeRegistrar registrar = new() { FailNextVirtualKey = (uint)'A' };
+        TestLogger logger = new();
+        using GlobalHotkeyService service = new(_ => { }, logger, registrar);
+
+        service.RegisterStartup("Alt+R", "Alt+T", "Ctrl+Alt+A");
+
+        string summary = Assert.Single(logger.Entries, entry => entry.Contains("시작 시 전역 단축키 등록 결과", StringComparison.Ordinal));
+        Assert.Contains("Read=Alt+R(성공)", summary, StringComparison.Ordinal);
+        Assert.Contains("Replace=Alt+T(성공)", summary, StringComparison.Ordinal);
+        Assert.Contains("Palette=Ctrl+Alt+A(실패)", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RegisterStartup_WithoutPaletteHotkey_ReportsItAsUnused()
+    {
+        FakeRegistrar registrar = new();
+        TestLogger logger = new();
+        using GlobalHotkeyService service = new(_ => { }, logger, registrar);
+
+        service.RegisterStartup("Alt+R", "Alt+T", "");
+
+        string summary = Assert.Single(logger.Entries, entry => entry.Contains("시작 시 전역 단축키 등록 결과", StringComparison.Ordinal));
+        Assert.Contains("Read=Alt+R(성공)", summary, StringComparison.Ordinal);
+        Assert.Contains("Palette=미사용", summary, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Register_WhenPaletteRegistrationFails_RestoresPreviousRegistrationSet()
     {

@@ -94,7 +94,7 @@ probe 도입으로 기존 경로가 느려지거나 실패하지 않는지 확�
 
 | # | 절차 | 기대 | 결과 | 비고 |
 |---|---|---|---|---|
-| H1 | 다른 앱이 `Ctrl+Alt+A`를 선점한 상태로 시작 | Palette만 비활성, **`Alt+R`/`Alt+T`는 정상 동작**, 경고 1회 | `PASS` | 격리된 startup hotkey 등록 단위 테스트 통과 |
+| H1 | 다른 앱이 `Ctrl+Alt+A`를 선점한 상태로 시작 | Palette만 비활성, **`Alt+R`/`Alt+T`는 정상 동작**, 경고 1회 | `PASS` | Test-HotkeyConflict.ps1 실행. Ctrl+Alt+A 선점 시 Palette만 등록 실패, Alt+R/Alt+T 유지 (등록 결과 요약 로그 추가 후 재확인 필요) |
 | H2 | 다른 앱이 `Alt+T`를 선점한 상태로 시작 | `Alt+R`은 정상 동작, 실패한 단축키만 경고 | `PASS` | 코어 핫키 독립 등록 단위 테스트 통과 |
 | H3 | 설정에서 Palette 단축키를 비움 → 저장 → 재시작 | 비활성 상태 유지(기본값으로 되살아나지 않음) | `PASS` | ValidOptionalHotkeyOrEmpty 검증 및 테스트 통과 |
 | H4 | 설정에서 Palette 단축키를 `Alt+R`로 지정 → 저장 | 저장은 성공하되 Palette만 비활성, core 단축키 보존 | `PASS` | 코어 우선 충돌 방지 정규화 테스트 통과 |
@@ -121,12 +121,12 @@ probe 도입으로 기존 경로가 느려지거나 실패하지 않는지 확�
 
 | # | 항목 | 기준 | 결과 | 비고 |
 |---|---|---|---|---|
-| G1 | `자연스럽게 다듬기`가 원문 **언어를 유지** | 원문 언어 보존 | 19/20 (FAIL) | [11/20] 1건에서 한국어 입력이 영어 번역문으로 출력됨 |
-| G2 | `자연스럽게 다듬기`가 의미·어조를 유지 | 의미 왜곡 없음 | 20/20 (PASS) | 원문 의미와 어조 보존 |
-| G3 | `요약`이 원문 **언어로** 출력 | 원문 언어로 요약 | 20/20 (PASS) | 전 샘플 원문 언어로 압축 요약 완료 |
-| G4 | 설명·라벨·코드펜스가 섞이지 않음 | 순수 텍스트 결과 | 20/20 (PASS) | "요약:", "수정본:" 등 서두 라벨 및 ``` 코드펜스 없음 |
-| G5 | 내부 `WTT-LINE` marker 유출 | 0회여야 함 | 0회 (PASS) | 다듬기 0회 / 요약 0회 |
-| G6 | 출력 길이 / 입력 길이 비율 | 4,000~5,000자 입력 기준 분포 기록 | PASS | 4,084자 입력 시 다듬기 1.00 (4,084자), 요약 0.04 (148자) |
+| G1 | `자연스럽게 다듬기`가 원문 **언어를 유지** | 원문 언어 보존 | `20/20 PASS` | 2026-09-16 15:25 실측(4,500자 입력). 프롬프트 수정 전 19/20 → 수정 후 20/20. 보고서: artifacts/verification/gemini-contract-RewriteNatural-20260916-152557.md |
+| G2 | `자연스럽게 다듬기`가 의미·어조를 유지 | 의미 왜곡 없음 | `판정 불가` | 기계 판정 불가. ManualProcedure.md 6절 절차로 사람이 10샘플 판정 필요 |
+| G3 | `요약`이 원문 **언어로** 출력 | 원문 언어로 요약 | `18/18 PASS` | 2026-09-16 15:26 실측. 20회 중 RateLimit 2건 제외한 18건 전부 원문 언어 |
+| G4 | 설명·라벨·코드펜스가 섞이지 않음 | 순수 텍스트 결과 | `38/38 PASS` | Rewrite 20/20 + Summarize 18/18. 서두 라벨·``` 코드펜스 0건 |
+| G5 | 내부 `WTT-LINE` marker 유출 | 0회여야 함 | `0회 PASS` | 40회 전체에서 유출 0회 |
+| G6 | 출력 길이 / 입력 길이 비율 | 4,000~5,000자 입력 기준 분포 기록 | `PASS` | 입력 4,500자. Rewrite 길이비 최소/중앙/최대 1.00/1.00/1.00, Summarize 0.05/0.05/0.05 |
 
 > G1에서 1건 번역 출력이 관찰되었으므로, PromptComposer의 다듬기 system prompt("절대 다른 언어로 번역하지 마십시오") 강조 보강이 권장된다.
 
@@ -141,8 +141,8 @@ Inno Setup 6.7.3 환경에서 `scripts/package-release.ps1`을 직접 실행하�
 | K1 | Inno Setup 6 설치 후 `scripts/package-release.ps1` | installer + portable zip + `SHA256SUMS.txt` 생성 | `PASS` | Setup exe (51.7MB), Portable zip (69.1MB) 생성 |
 | K2 | installer 버전 = `Get-ReleaseVersion.ps1` | 일치 (1.2.0) | `PASS` | 버전 1.2.0 일치 확인 |
 | K3 | 체크섬 검증 | 일치 (Setup / Portable 해시 100% 일치) | `PASS` | SHA256SUMS.txt와 파일 해시 100% 일치 |
-| K4 | **기존 설정을 보유한 PC에 upgrade 설치** | 기존 `appsettings.json`·API 키·히스토리 보존 | `PASS` | LocalAppData 경로 격리로 원본 온전히 보존 |
-| K5 | upgrade 후 `ActionPaletteHotkey` | 기본값 `Ctrl+Alt+A`로 추가되고 기존 값은 보존 | `PASS` | 구버전 로드 시 기본값 자동 할당 확인 |
+| K4 | **기존 설정을 보유한 PC에 upgrade 설치** | 기존 `appsettings.json`·API 키·히스토리 보존 | `PASS` | 2026-09-16 15:5x 실제 무인 설치 후 대조. config/secrets/history 5개 파일 전부 해시 동일 |
+| K5 | upgrade 후 `ActionPaletteHotkey` | 기본값 `Ctrl+Alt+A`로 추가되고 기존 값은 보존 | `PASS` | 설치 후 ActionPaletteHotkey=Ctrl+Alt+A, Read/Replace/ReadTargetLanguage/ReplaceFormat 4개 보존 |
 
 ---
 
@@ -164,13 +164,13 @@ Inno Setup 6.7.3 환경에서 `scripts/package-release.ps1`을 직접 실행하�
 | 3. 기존 기능 회귀 | 10 | 0 | 0 |
 | 4. 단축키 등록 | 6 | 0 | 0 |
 | 5. 오류/네트워크 | 5 | 0 | 0 |
-| 6. 응답 품질 | 5 | 1 | 0 |
+| 6. 응답 품질 | 5 | 0 | 1 |
 | 7. 패키징 | 5 | 0 | 0 |
 
 최종 판정:
 
 ```text
 □ release 가능
-■ 조건부 (조건: G1 다듬기 1건 원문 언어 이탈(19/20) 프롬프트 보강 검토)
+■ 조건부 (조건: G2 및 사람만 판정 가능한 항목 미수행 - ManualProcedure.md 참조)
 □ 판정 불가 — 수동 검증 미수행
 ```

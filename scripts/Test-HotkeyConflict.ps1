@@ -88,20 +88,29 @@ try {
     if ($relevant) { $relevant | ForEach-Object { Write-Host "  $_" } } else { Write-Host "  (없음)" }
     Write-Host ""
 
-    $registered = $relevant | Where-Object { $_ -match '전역 단축키를 등록했습니다' }
-    $failed     = $relevant | Where-Object { $_ -match '등록하지 못했습니다|사용 중' }
+    # 시작 경로는 실패만 로그에 남기던 문제가 있어, 이제 키별 결과 요약 한 줄을 남긴다.
+    $summary = $relevant | Where-Object { $_ -match '시작 시 전역 단축키 등록 결과' } | Select-Object -Last 1
+    $failed  = $relevant | Where-Object { $_ -match '등록하지 못했습니다|사용 중' }
 
-    $readAlive    = $registered -match 'Read='
-    $replaceAlive = $registered -match 'Replace='
+    if (-not $summary) {
+        Write-Host "판정 불가  등록 결과 요약 로그가 없습니다. 이 빌드가 최신인지 확인하세요." -ForegroundColor Yellow
+        Write-Host "           (scripts\publish.ps1 재실행 필요)"
+        exit 2
+    }
+
+    $readAlive    = $summary -match 'Read=\S+\(성공\)'
+    $replaceAlive = $summary -match 'Replace=\S+\(성공\)'
+    $paletteAlive = $summary -match 'Palette=\S+\(성공\)'
 
     if ($Chord -match 'Ctrl.*Alt.*A') {
         Write-Host "--- H1 판정 ---"
         Write-Host ("  Palette 등록 실패 경고 존재 : {0}" -f ($(if ($failed) { 'PASS' } else { 'FAIL' })))
+        Write-Host ("  Palette 비활성              : {0}" -f ($(if (-not $paletteAlive) { 'PASS' } else { 'FAIL' })))
         Write-Host ("  Alt+R / Alt+T 유지          : {0}" -f ($(if ($readAlive -and $replaceAlive) { 'PASS' } else { 'FAIL' })))
     } else {
         Write-Host "--- H2 판정 ---"
         Write-Host ("  충돌 단축키만 실패 경고     : {0}" -f ($(if ($failed) { 'PASS' } else { 'FAIL' })))
-        Write-Host ("  나머지 core 단축키 유지     : {0}" -f ($(if ($readAlive) { 'PASS' } else { 'FAIL' })))
+        Write-Host ("  나머지 core 단축키 유지     : {0}" -f ($(if ($readAlive -or $replaceAlive) { 'PASS' } else { 'FAIL' })))
     }
     Write-Host "`n위 로그 원문을 수동 검증 매트릭스의 비고에 붙여 넣으세요."
 }

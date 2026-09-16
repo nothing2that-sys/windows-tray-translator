@@ -39,8 +39,21 @@ public sealed class GlobalHotkeyService : IDisposable
         {
             TryRegisterStartupOne(ActionPaletteHotkeyId, "Quick Action 단축키", paletteHotkey, value => currentPalette = value, failures);
         }
+
+        // Startup used to log only failures, so a working set left no evidence at all and the most
+        // common diagnostic question - "is Alt+R actually registered?" - had no answer in the log.
+        logger.Information(
+            "시작 시 전역 단축키 등록 결과. " +
+            $"Read={DescribeOutcome(readHotkey, currentRead)}, " +
+            $"Replace={DescribeOutcome(replaceHotkey, currentReplace)}, " +
+            $"Palette={DescribeOutcome(paletteHotkey, currentPalette)}");
         return failures;
     }
+
+    private static string DescribeOutcome(string? configured, HotkeyDefinition? current) =>
+        string.IsNullOrWhiteSpace(configured)
+            ? "미사용"
+            : $"{configured}({(current is null ? "실패" : "성공")})";
 
     public void Register(string readHotkey, string replaceHotkey, string? paletteHotkey = null)
     {
