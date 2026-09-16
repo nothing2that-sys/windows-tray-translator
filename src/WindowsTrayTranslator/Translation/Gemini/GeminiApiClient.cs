@@ -96,11 +96,18 @@ public sealed class GeminiApiClient
 
         string endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(model)}:generateContent";
         string payload = SerializeRequest(systemPrompt, userPrompt);
-        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        // The reason the server gave on an earlier attempt. Our own deadline firing later is an
+        // artefact of the retry, not an explanation, so a recorded server reason outranks it.
+        TranslationResult? lastServerFailure = null;
 
         for (int attempt = 0; attempt <= transientRetryCount; attempt++)
         {
+            // Every attempt gets the full budget. A single deadline shared by all attempts meant a
+            // slow first attempt (measured: 24.9s before a 503) left the retry a few seconds, so a
+            // busy server was always reported as a timeout and the retry could never succeed.
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
             try
             {
                 using HttpRequestMessage message = new(HttpMethod.Post, endpoint);
@@ -152,7 +159,8 @@ public sealed class GeminiApiClient
                 TranslationResult failure = MapStatusCode(response, body);
                 if (attempt < transientRetryCount && IsTransient(response.StatusCode))
                 {
-                    await Task.Delay(TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt)), timeout.Token);
+                    lastServerFailure = failure;
+                    await Task.Delay(TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt)), cancellationToken);
                     continue;
                 }
 
@@ -164,14 +172,15 @@ public sealed class GeminiApiClient
             }
             catch (OperationCanceledException)
             {
-                return TranslationResult.Failure(TranslationFailureKind.Timeout, "요청 시간이 초과되었습니다.");
+                return lastServerFailure ??
+                    TranslationResult.Failure(TranslationFailureKind.Timeout, "요청 시간이 초과되었습니다.");
             }
             catch (HttpRequestException ex) when (attempt < transientRetryCount)
             {
                 logger.Warning($"Gemini 네트워크 요청을 재시도합니다. Attempt={attempt + 1}, Error={ex.GetType().Name}");
                 try
                 {
-                    await Task.Delay(TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt)), timeout.Token);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt)), cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -179,7 +188,8 @@ public sealed class GeminiApiClient
                 }
                 catch (OperationCanceledException)
                 {
-                    return TranslationResult.Failure(TranslationFailureKind.Timeout, "요청 시간이 초과되었습니다.");
+                    return lastServerFailure ??
+                        TranslationResult.Failure(TranslationFailureKind.Timeout, "요청 시간이 초과되었습니다.");
                 }
             }
             catch (HttpRequestException)
@@ -188,7 +198,8 @@ public sealed class GeminiApiClient
             }
         }
 
-        return TranslationResult.Failure(TranslationFailureKind.Network, "네트워크 연결을 확인해 주세요.");
+        return lastServerFailure ??
+            TranslationResult.Failure(TranslationFailureKind.Network, "네트워크 연결을 확인해 주세요.");
     }
 
     public async Task<GeminiModelListResult> ListModelsAsync(
@@ -336,6 +347,10 @@ public sealed class GeminiApiClient
             TranslationResult.Failure(
                 TranslationFailureKind.ModelUnavailable,
                 "설정한 Gemini 모델을 사용할 수 없습니다. 설정에서 모델명을 확인해 주세요."),
+        HttpStatusCode.ServiceUnavailable =>
+            TranslationResult.Failure(
+                TranslationFailureKind.Server,
+                "Gemini 서버가 혼잡합니다. 잠시 후 다시 시도하거나 더 가벼운 모델을 선택해 주세요."),
         _ when (int)response.StatusCode >= 500 =>
             TranslationResult.Failure(TranslationFailureKind.Server, "서버에서 오류가 발생했습니다."),
         _ => TranslationResult.Failure(TranslationFailureKind.InvalidRequest, "요청을 처리하지 못했습니다.")

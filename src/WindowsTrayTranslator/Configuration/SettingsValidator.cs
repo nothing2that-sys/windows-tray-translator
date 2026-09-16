@@ -28,6 +28,7 @@ public static class SettingsValidator
         settings.Translation.ClipboardRetryDelayMs = Math.Clamp(settings.Translation.ClipboardRetryDelayMs, 10, 1000);
         settings.Api.RequestTimeoutSeconds = Math.Clamp(settings.Api.RequestTimeoutSeconds, 5, 120);
         settings.Api.TransientRetryCount = Math.Clamp(settings.Api.TransientRetryCount, 0, 5);
+        settings.Api.ActionRequestTimeoutSeconds = Math.Clamp(settings.Api.ActionRequestTimeoutSeconds, 5, 300);
 
         settings.Translation.ReadTargetLanguage = ValidReadTargetLanguage(settings.Translation.ReadTargetLanguage);
         settings.Translation.ReplaceTargetLanguage = ValidReplaceTargetLanguage(settings.Translation.ReplaceTargetLanguage);

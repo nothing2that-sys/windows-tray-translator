@@ -62,6 +62,7 @@ public sealed class SettingsForm : Form
         Text = "Quick Action(요약·다듬기·번역 후 요약)에 다른 모델 사용",
         AutoSize = true
     };
+    private readonly NumericUpDown actionTimeoutNumeric = CreateNumeric(5, 300);
     private readonly ComboBox actionModelComboBox = CreateEditableCombo(
         "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
@@ -320,9 +321,11 @@ public sealed class SettingsForm : Form
         AddSectionRow(table, "Quick Action 모델");
         AddFullRow(table, actionModelCheckBox);
         AddRow(table, "Quick Action 모델", actionModelComboBox);
+        AddRow(table, "Quick Action 제한 시간 (초)", actionTimeoutNumeric);
         AddFullRow(table, new Label
         {
-            Text = "요약은 번역보다 더 큰 모델이 필요합니다. 요약이 핵심을 잃고 단어만 남으면 여기서 상위 모델을 지정하세요.",
+            Text = "요약은 번역보다 더 큰 모델이 필요합니다. 요약이 핵심을 잃고 단어만 남으면 여기서 상위 모델을 지정하세요.\r\n"
+                + "상위 모델은 한 번의 요약에 10초 이상 걸릴 수 있어 제한 시간을 번역과 따로 둡니다.",
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
             MaximumSize = new Size(600, 0)
@@ -394,6 +397,7 @@ public sealed class SettingsForm : Form
         actionModelCheckBox.Checked = settings.Api.EnableActionModel;
         actionModelComboBox.Text = settings.Api.ActionModel;
         actionModelComboBox.Enabled = actionModelCheckBox.Checked;
+        actionTimeoutNumeric.Value = settings.Api.ActionRequestTimeoutSeconds;
         RefreshSavedKeyLabel();
     }
 
@@ -461,7 +465,8 @@ public sealed class SettingsForm : Form
             FallbackModel = fallbackModelComboBox.Text,
             OfferFallbackAfterCompletion = fallbackAfterCompletionCheckBox.Checked,
             EnableActionModel = actionModelCheckBox.Checked,
-            ActionModel = actionModelComboBox.Text
+            ActionModel = actionModelComboBox.Text,
+            ActionRequestTimeoutSeconds = (int)actionTimeoutNumeric.Value
         }
     };
 

@@ -58,4 +58,7 @@ public sealed class ApiSettings
     // translation: a lite model compresses a summary into keywords instead of keeping the meaning.
     public bool EnableActionModel { get; set; }
     public string ActionModel { get; set; } = "gemini-3.5-flash";
+    // Summaries are not typed-response latency: a thinking model measured 9-44s per call, so the
+    // translation budget would reject answers that are on their way.
+    public int ActionRequestTimeoutSeconds { get; set; } = 90;
 }

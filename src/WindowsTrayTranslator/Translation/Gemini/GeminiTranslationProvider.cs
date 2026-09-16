@@ -64,7 +64,7 @@ public sealed class GeminiTranslationProvider : ITranslationProvider
             model.Trim(),
             plan.SystemPrompt,
             plan.UserPrompt,
-            settings.Api.RequestTimeoutSeconds,
+            settings.Api.ActionRequestTimeoutSeconds,
             settings.Api.TransientRetryCount,
             cancellationToken);
     }

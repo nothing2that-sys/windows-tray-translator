@@ -43,9 +43,11 @@ Windows에서 텍스트를 선택한 뒤 단축키만 누르면 Gemini로 즉시
 
 - 일반: 번역 활성화, Windows 자동 시작, 읽기·작성별 팝업 자동 닫기, 진단 로그와 번역 히스토리 설정
 - 번역: 대상 언어, 작성 결과 형식, 읽기·작성·Quick Action 단축키, 클립보드 설정
-- API: Gemini 키와 모델, 모델 목록 조회, Quick Action 전용 모델, 보조 모델, 요청 제한 시간, 재시도, 연결 테스트
+- API: Gemini 키와 모델, 모델 목록 조회, Quick Action 전용 모델과 제한 시간, 보조 모델, 요청 제한 시간, 재시도, 연결 테스트
 
 요약은 번역보다 큰 모델을 요구합니다. 경량 모델은 문장을 단어로 줄이고 핵심을 빼는 경우가 있어, `API` 탭의 `Quick Action에 다른 모델 사용`을 켜면 요약·다듬기·번역 후 요약만 상위 모델로 실행합니다. `Alt+R`과 `Alt+T` 번역은 기존 모델을 그대로 쓰며, 이 모델은 보조 모델로 전환되지 않습니다.
+
+상위 모델은 요약 한 번에 10초에서 45초까지 걸리고 혼잡할 때 503을 돌려줍니다. 그래서 Quick Action은 번역과 별도의 제한 시간(기본 90초, `API` 탭에서 변경)을 씁니다. 재시도는 시도마다 제한 시간을 각각 받으므로 첫 시도가 느려도 다음 시도가 바로 죽지 않습니다. 서버가 혼잡해 실패한 경우에는 시간 초과가 아니라 혼잡 사실을 그대로 알려 줍니다.
 
 새 단축키가 다른 프로그램과 충돌하면 저장하지 않고 기존 단축키를 복구합니다. 시작할 때 충돌이 발생한 경우에는 성공한 단축키를 그대로 유지하고 실패한 단축키만 알림으로 안내합니다. `Windows 시작 시 자동 실행`은 현재 사용자 계정의 시작 프로그램에 등록되며 설정을 해제하면 제거됩니다.
 
@@ -99,8 +101,8 @@ Inno Setup 6가 설치된 Windows에서 아래 canonical scripts를 실행합니
 `Directory.Build.props`의 Version을 기준으로 `artifacts\release\<version>` 아래에 공개용 파일 3개를 생성합니다.
 
 ```text
-WindowsTrayTranslator-Setup-1.3.0-x64.exe
-WindowsTrayTranslator-Portable-1.3.0-x64.zip
+WindowsTrayTranslator-Setup-1.3.1-x64.exe
+WindowsTrayTranslator-Portable-1.3.1-x64.zip
 SHA256SUMS.txt
 ```
 
@@ -139,7 +141,7 @@ Portable ZIP과 Installer는 .NET 10 Windows x64 Runtime을 포함합니다. fra
 
 공개 전환과 독립 검증이 끝난 뒤 GitHub Releases에는 self-contained Installer, Portable ZIP, `SHA256SUMS.txt`만 제공합니다. 현재 설치 프로그램은 코드 서명되지 않아 Windows SmartScreen 경고가 표시될 수 있습니다.
 
-Version `1.3.0`의 canonical packaging 명령은 다음과 같습니다.
+Version `1.3.1`의 canonical packaging 명령은 다음과 같습니다.
 
 ```powershell
 ./scripts/build.ps1
@@ -147,7 +149,7 @@ Version `1.3.0`의 canonical packaging 명령은 다음과 같습니다.
 ./scripts/package-release.ps1 -NoRestore
 ```
 
-`v1.3.0` 형식의 tag workflow는 tag와 `Directory.Build.props` version의 일치를 확인하고 Draft Release를 생성합니다. Repository Public 전환과 Release 공개 게시는 별도 승인 작업입니다.
+`v1.3.1` 형식의 tag workflow는 tag와 `Directory.Build.props` version의 일치를 확인하고 Draft Release를 생성합니다. Repository Public 전환과 Release 공개 게시는 별도 승인 작업입니다.
 
 ## Security and license
 

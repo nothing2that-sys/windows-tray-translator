@@ -355,6 +355,81 @@ public sealed class GenerationSeamTests
         }
     }
 
+    /// <summary>
+    /// Measured defect: one deadline was shared by every attempt, so a slow first attempt (24.9s
+    /// before a 503) left the retry a few seconds and the call could never recover. Each attempt
+    /// now gets the full budget, so three 0.6s attempts succeed under a 1s per-attempt timeout.
+    /// </summary>
+    [Fact]
+    public async Task SendAsync_GivesEveryRetryItsOwnBudgetInsteadOfSharingOne()
+    {
+        DelayHandler handler = new(call => call < 3
+            ? (TimeSpan.FromMilliseconds(600), Status(HttpStatusCode.ServiceUnavailable))
+            : (TimeSpan.FromMilliseconds(600), Ok("결과")));
+        GeminiApiClient client = new(new HttpClient(handler), new TestLogger());
+        PromptPlan plan = PromptComposer.Compose(BuiltInActionKind.Summarize, "원문");
+
+        TranslationResult result = await client.GenerateAsync(
+            "key", "gemini-test", plan.SystemPrompt, plan.UserPrompt,
+            timeoutSeconds: 1, transientRetryCount: 2, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, handler.Calls);
+    }
+
+    /// <summary>
+    /// The deadline firing after a busy server is an artefact of our own retry, not an explanation.
+    /// Reporting it as a timeout is what hid a measured 503 behind "요청 시간이 초과되었습니다".
+    /// </summary>
+    [Fact]
+    public async Task SendAsync_ReportsTheServerReasonRatherThanTheDeadlineThatFollowedIt()
+    {
+        DelayHandler handler = new(call => call == 1
+            ? (TimeSpan.Zero, Status(HttpStatusCode.ServiceUnavailable))
+            : (TimeSpan.FromSeconds(5), Ok("결과")));
+        GeminiApiClient client = new(new HttpClient(handler), new TestLogger());
+        PromptPlan plan = PromptComposer.Compose(BuiltInActionKind.Summarize, "원문");
+
+        TranslationResult result = await client.GenerateAsync(
+            "key", "gemini-test", plan.SystemPrompt, plan.UserPrompt,
+            timeoutSeconds: 1, transientRetryCount: 1, CancellationToken.None);
+
+        Assert.Equal(TranslationFailureKind.Server, result.FailureKind);
+        Assert.Contains("혼잡", result.ErrorMessage);
+        Assert.DoesNotContain("시간이 초과", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Provider_GenerateAsync_UsesTheQuickActionTimeoutNotTheTranslationTimeout()
+    {
+        DelayHandler handler = new(_ => (TimeSpan.FromSeconds(5), Ok("결과")));
+        AppSettings settings = new();
+        settings.Api.RequestTimeoutSeconds = 60;
+        settings.Api.ActionRequestTimeoutSeconds = 1;
+        settings.Api.TransientRetryCount = 0;
+        GeminiTranslationProvider provider = new(
+            new GeminiApiClient(new HttpClient(handler), new TestLogger()),
+            new FakeSecretStore(),
+            () => settings);
+
+        TranslationResult result = await provider.GenerateAsync(
+            PromptComposer.Compose(BuiltInActionKind.Summarize, "원문"),
+            CancellationToken.None);
+
+        Assert.Equal(TranslationFailureKind.Timeout, result.FailureKind);
+    }
+
+    private static HttpResponseMessage Ok(string text) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(
+            $"{{\"candidates\":[{{\"content\":{{\"parts\":[{{\"text\":{JsonSerializer.Serialize(text)}}}]}}}}]}}")
+    };
+
+    private static HttpResponseMessage Status(HttpStatusCode code) => new(code)
+    {
+        Content = new StringContent("{}")
+    };
+
     private static RecordingHandler Respond(string text) => new(_ => new HttpResponseMessage(HttpStatusCode.OK)
     {
         Content = new StringContent(
@@ -369,6 +444,28 @@ public sealed class GenerationSeamTests
         {
             LastBody = request.Content?.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult();
             return Task.FromResult(responseFactory(request));
+        }
+    }
+
+    /// <summary>
+    /// Delays asynchronously on the request's own token, so a per-attempt deadline is observed the
+    /// way a real slow server is. A handler that blocks its thread never lets cancellation run.
+    /// </summary>
+    private sealed class DelayHandler(Func<int, (TimeSpan Delay, HttpResponseMessage Response)> plan) : HttpMessageHandler
+    {
+        private int calls;
+
+        public int Calls => calls;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            (TimeSpan delay, HttpResponseMessage response) = plan(Interlocked.Increment(ref calls));
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+
+            return response;
         }
     }
 

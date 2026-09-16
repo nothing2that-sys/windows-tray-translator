@@ -56,7 +56,7 @@ public sealed class ConfigurationServiceTests : IDisposable
             {
               "General": { "PopupTimeoutMs": -1, "LogRetentionDays": 1000, "HistoryRetentionDays": 0 },
               "Translation": { "MaxInputCharacters": 0, "ReadHotkey": "R", "ReplaceHotkey": "Alt+T", "ReplaceFormat": "999" },
-              "Api": { "Model": "", "RequestTimeoutSeconds": 999 }
+              "Api": { "Model": "", "RequestTimeoutSeconds": 999, "ActionRequestTimeoutSeconds": 9999 }
             }
             """);
 
@@ -72,6 +72,7 @@ public sealed class ConfigurationServiceTests : IDisposable
         Assert.Equal("TranslationWithOriginal", settings.Translation.ReplaceFormat);
         Assert.Equal("gemini-3.5-flash-lite", settings.Api.Model);
         Assert.Equal(120, settings.Api.RequestTimeoutSeconds);
+        Assert.Equal(300, settings.Api.ActionRequestTimeoutSeconds);
     }
 
     [Fact]
