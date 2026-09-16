@@ -535,23 +535,16 @@ Task<TranslationResult> GenerateAsync(
     string model,
     string systemPrompt,
     string userPrompt,
-    bool useLineMarkers,
     int timeoutSeconds,
     int transientRetryCount,
     CancellationToken cancellationToken);
 ```
 
-기존 `TranslateAsync`는 다음을 조합하는 wrapper로 유지한다.
+`GenerateAsync`는 항상 marker-free다. `TranslationLayoutPreserver.Prepare`, `Restore`, `SanitizeOutput`을 모두 우회하고, 정상 output을 그대로 보존하며, 내부 `WTT-LINE` marker가 발견되면 조용히 삭제하지 않고 `InvalidResponse`로 실패 처리한다. 이를 통해 요약 목록의 선행 공백과 들여쓰기를 보존한다.
 
-```text
-기존 translation system prompt
-기존 target language instruction
-useLineMarkers = true
-```
+`TranslateAsync`와 `GenerateAsync`는 HTTP, retry, status mapping을 담당하는 **private core 하나를 공유**한다. `TranslateAsync`는 기존 translation system prompt와 target language instruction을 조합하고 exact-line marker를 적용하며, public signature와 payload를 그대로 유지한다.
 
-기존 method signature와 test가 가능한 한 유지되도록 overload 또는 private core 사용을 우선한다.
-
-`useLineMarkers=false` 경로는 `TranslationLayoutPreserver.Prepare`, `Restore`, `SanitizeOutput`을 모두 우회한다. 정상 output을 그대로 보존하고, 내부 `WTT-LINE` marker가 발견되면 조용히 삭제하지 않고 `InvalidResponse`로 실패 처리한다. 이를 통해 요약 목록의 선행 공백과 들여쓰기를 보존한다.
+marker 적용 여부를 `GenerateAsync`의 parameter로 두지 않는다. marker는 **선택 문자열에만** 적용해야 하는데 `GenerateAsync`는 지시문과 본문이 합쳐진 `userPrompt` 하나만 받으므로, 그 경로에서는 지시문 줄까지 marker가 붙어 payload가 깨진다. 따라서 marker는 translation 전용이며 private core를 통해서만 적용한다.
 
 ### 13.3 PromptComposer
 
@@ -560,9 +553,10 @@ useLineMarkers = true
 ```csharp
 internal sealed record PromptPlan(
     string SystemPrompt,
-    string UserPrompt,
-    bool UseLineMarkers);
+    string UserPrompt);
 ```
+
+Palette Action은 모두 marker-free이므로 plan에 marker flag를 두지 않는다.
 
 Action별 정책:
 
@@ -767,7 +761,7 @@ Action 작업 전에 다음 기존 결함을 작은 regression slice로 분리�
 - `PromptComposer`
 - 기존 번역 payload/test 호환
 - Rewrite/Summary payload에 translation rule/marker 없음
-- `useLineMarkers=false`에서 Prepare/Restore/Sanitize 완전 우회
+- `GenerateAsync`에서 Prepare/Restore/Sanitize 완전 우회
 - action-neutral error/title
 
 ### Slice D. Quick Action Palette

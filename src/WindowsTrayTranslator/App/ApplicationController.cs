@@ -524,30 +524,57 @@ public sealed class ApplicationController : IDisposable
     /// The whole body is inside try/finally and the finally is the single place that releases the
     /// operation gate, so no synchronous or asynchronous failure can strand it.
     /// </summary>
-    private async Task RunPaletteActionAsync(
+    private Task RunPaletteActionAsync(
         BuiltInActionKind kind,
         string selectedText,
         long operationId,
-        CancellationTokenSource cancellation)
+        CancellationTokenSource cancellation) =>
+        RunPaletteGenerationAsync(
+            token =>
+            {
+                if (Settings.General.ShowTranslatingPopup)
+                {
+                    ShowPopup(
+                        true,
+                        TranslationPopupKind.Translating,
+                        "결과를 만들고 있습니다…",
+                        operationId: operationId,
+                        title: PromptComposer.DisplayName(kind));
+                }
+
+                return directTranslationProvider.GenerateAsync(
+                    PromptComposer.Compose(kind, selectedText),
+                    token);
+            },
+            cancellation,
+            () => IsCurrentPaletteOperation(operationId),
+            result => PublishPaletteResult(kind, selectedText, operationId, result),
+            ex =>
+            {
+                logger.Error("Quick Action 실행 중 오류가 발생했습니다.", ex);
+                Notify("Quick Action 실행 중 오류가 발생했습니다.", ToolTipIcon.Error);
+            },
+            () => CompletePaletteOperation(operationId, cancellation),
+            logger);
+
+    /// <summary>
+    /// Owns the generation lifecycle. Every exit path - success, failure, staleness, cancellation
+    /// and any synchronous or asynchronous exception - runs <paramref name="complete"/> exactly
+    /// once, and a stale or cancelled operation publishes nothing.
+    /// </summary>
+    internal static async Task RunPaletteGenerationAsync(
+        Func<CancellationToken, Task<TranslationResult>> generate,
+        CancellationTokenSource cancellation,
+        Func<bool> isCurrentOperation,
+        Action<TranslationResult> publish,
+        Action<Exception> reportUnexpected,
+        Action complete,
+        ILogger logger)
     {
         try
         {
-            string title = PromptComposer.DisplayName(kind);
-            if (Settings.General.ShowTranslatingPopup)
-            {
-                ShowPopup(
-                    true,
-                    TranslationPopupKind.Translating,
-                    "결과를 만들고 있습니다…",
-                    operationId: operationId,
-                    title: title);
-            }
-
-            TranslationResult result = await directTranslationProvider.GenerateAsync(
-                PromptComposer.Compose(kind, selectedText),
-                cancellation.Token);
-
-            if (!IsCurrentPaletteOperation(operationId) || cancellation.IsCancellationRequested)
+            TranslationResult result = await generate(cancellation.Token);
+            if (!isCurrentOperation() || cancellation.IsCancellationRequested)
             {
                 return;
             }
@@ -557,24 +584,7 @@ public sealed class ApplicationController : IDisposable
                 return;
             }
 
-            (TranslationPopupKind popupKind, string message, string? copyText) =
-                ResolveActionPopup(result, Settings);
-            if (result.IsSuccess)
-            {
-                logger.Information($"Quick Action을 완료했습니다. Action={kind}, InputCharacters={selectedText.Length}, OutputCharacters={result.TranslatedText!.Length}, Kind={popupKind}");
-            }
-            else
-            {
-                logger.Warning($"Quick Action 실행에 실패했습니다. Action={kind}, Kind={result.FailureKind}, InputCharacters={selectedText.Length}");
-            }
-
-            ShowPopup(
-                true,
-                popupKind,
-                message,
-                copyText: copyText,
-                operationId: operationId,
-                title: title);
+            publish(result);
         }
         catch (OperationCanceledException)
         {
@@ -582,23 +592,53 @@ public sealed class ApplicationController : IDisposable
         }
         catch (Exception ex)
         {
-            logger.Error("Quick Action 실행 중 오류가 발생했습니다.", ex);
-            Notify("Quick Action 실행 중 오류가 발생했습니다.", ToolTipIcon.Error);
+            reportUnexpected(ex);
         }
         finally
         {
-            lock (paletteSync)
-            {
-                if (paletteOperationId == operationId)
-                {
-                    paletteCancellation = null;
-                }
+            complete();
+        }
+    }
 
-                cancellation.Dispose();
+    private void PublishPaletteResult(
+        BuiltInActionKind kind,
+        string selectedText,
+        long operationId,
+        TranslationResult result)
+    {
+        (TranslationPopupKind popupKind, string message, string? copyText) =
+            ResolveActionPopup(result, Settings);
+        if (result.IsSuccess)
+        {
+            logger.Information($"Quick Action을 완료했습니다. Action={kind}, InputCharacters={selectedText.Length}, OutputCharacters={result.TranslatedText!.Length}, Kind={popupKind}");
+        }
+        else
+        {
+            logger.Warning($"Quick Action 실행에 실패했습니다. Action={kind}, Kind={result.FailureKind}, InputCharacters={selectedText.Length}");
+        }
+
+        ShowPopup(
+            true,
+            popupKind,
+            message,
+            copyText: copyText,
+            operationId: operationId,
+            title: PromptComposer.DisplayName(kind));
+    }
+
+    private void CompletePaletteOperation(long operationId, CancellationTokenSource cancellation)
+    {
+        lock (paletteSync)
+        {
+            if (paletteOperationId == operationId)
+            {
+                paletteCancellation = null;
             }
 
-            operationGate.Release();
+            cancellation.Dispose();
         }
+
+        operationGate.Release();
     }
 
     /// <summary>
