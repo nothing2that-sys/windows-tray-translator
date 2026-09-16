@@ -631,6 +631,11 @@ Completed
 - Palette 표시 중에는 `operationGate`를 점유하지 않음
 - Action click 시 source window가 여전히 active인지 확인; 달라졌으면 실행하지 않고 다시 선택하도록 안내
 - gate가 이미 사용 중일 때 대기/자동 재시도/timeout 연장 상태를 만들지 않음
+
+> busy 경로에 대한 보정(2026-09-16 실측): 모든 hotkey가 gate 획득 이전에 기존 Palette를 닫으므로,
+> 팔레트가 열린 채 gate가 점유되는 상태는 사용자 조작으로 만들어지지 않는다. 즉 위 busy 규정은
+> **도달 불가한 방어 규정**이다. `PaletteAdmission.Busy` 분기는 "새 hotkey가 팔레트를 닫는다"는
+> 규칙이 바뀔 때의 안전망으로 유지하되, 수동 검증 항목으로 취급하지 않는다.
 - Action generation 시작 시에만 captured text를 request로 넘기고 Palette session 참조 해제
 - admission을 획득한 `RunPaletteActionAsync`는 method 전체를 `try/catch/finally`로 감싸고 `finally`에서 `operationGate.Release()`
 - Palette generation은 `paletteOperationId`와 `paletteCancellation` 필드로 소유
