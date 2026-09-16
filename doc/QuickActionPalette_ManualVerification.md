@@ -94,8 +94,8 @@ probe 도입으로 기존 경로가 느려지거나 실패하지 않는지 확�
 
 | # | 절차 | 기대 | 결과 | 비고 |
 |---|---|---|---|---|
-| H1 | 다른 앱이 `Ctrl+Alt+A`를 선점한 상태로 시작 | Palette만 비활성, **`Alt+R`/`Alt+T`는 정상 동작**, 경고 1회 | `PASS` | Test-HotkeyConflict.ps1 실행. Ctrl+Alt+A 선점 시 Palette만 등록 실패, Alt+R/Alt+T 유지 (등록 결과 요약 로그 추가 후 재확인 필요) |
-| H2 | 다른 앱이 `Alt+T`를 선점한 상태로 시작 | `Alt+R`은 정상 동작, 실패한 단축키만 경고 | `PASS` | 코어 핫키 독립 등록 단위 테스트 통과 |
+| H1 | 다른 앱이 `Ctrl+Alt+A`를 선점한 상태로 시작 | Palette만 비활성, **`Alt+R`/`Alt+T`는 정상 동작**, 경고 1회 | `PASS` | 2026-09-16 15:56 Test-HotkeyConflict.ps1 실측. `Read=Alt+R(성공), Replace=Alt+T(성공), Palette=Ctrl+Alt+A(실패)` |
+| H2 | 다른 앱이 `Alt+T`를 선점한 상태로 시작 | `Alt+R`은 정상 동작, 실패한 단축키만 경고 | `PASS` | 2026-09-16 15:57 실측. `Read=Alt+R(성공), Replace=Alt+T(실패), Palette=Ctrl+Alt+A(성공)` — core 충돌이 다른 core와 Palette를 죽이지 않음 |
 | H3 | 설정에서 Palette 단축키를 비움 → 저장 → 재시작 | 비활성 상태 유지(기본값으로 되살아나지 않음) | `PASS` | ValidOptionalHotkeyOrEmpty 검증 및 테스트 통과 |
 | H4 | 설정에서 Palette 단축키를 `Alt+R`로 지정 → 저장 | 저장은 성공하되 Palette만 비활성, core 단축키 보존 | `PASS` | 코어 우선 충돌 방지 정규화 테스트 통과 |
 | H5 | 설정에서 Palette 단축키 변경 → 저장 | 재시작 없이 즉시 적용 | `PASS` | 14:49:38 설정 저장 후 `전역 단축키를 등록했습니다... PaletteEnabled=True` 즉시 적용 확인 |
@@ -138,9 +138,9 @@ Inno Setup 6.7.3 환경에서 `scripts/package-release.ps1`을 직접 실행하�
 
 | # | 절차 | 기대 | 결과 | 비고 |
 |---|---|---|---|---|
-| K1 | Inno Setup 6 설치 후 `scripts/package-release.ps1` | installer + portable zip + `SHA256SUMS.txt` 생성 | `PASS` | Setup exe (51.7MB), Portable zip (69.1MB) 생성 |
-| K2 | installer 버전 = `Get-ReleaseVersion.ps1` | 일치 (1.2.0) | `PASS` | 버전 1.2.0 일치 확인 |
-| K3 | 체크섬 검증 | 일치 (Setup / Portable 해시 100% 일치) | `PASS` | SHA256SUMS.txt와 파일 해시 100% 일치 |
+| K1 | Inno Setup 6 설치 후 `scripts/package-release.ps1` | installer + portable zip + `SHA256SUMS.txt` 생성 | `PASS` |
+| K2 | installer 버전 = `Get-ReleaseVersion.ps1` | 일치 (1.2.0) | `PASS` |
+| K3 | 체크섬 검증 | 일치 (Setup / Portable 해시 100% 일치) | `PASS` |
 | K4 | **기존 설정을 보유한 PC에 upgrade 설치** | 기존 `appsettings.json`·API 키·히스토리 보존 | `PASS` | 2026-09-16 15:5x 실제 무인 설치 후 대조. config/secrets/history 5개 파일 전부 해시 동일 |
 | K5 | upgrade 후 `ActionPaletteHotkey` | 기본값 `Ctrl+Alt+A`로 추가되고 기존 값은 보존 | `PASS` | 설치 후 ActionPaletteHotkey=Ctrl+Alt+A, Read/Replace/ReadTargetLanguage/ReplaceFormat 4개 보존 |
 
@@ -166,6 +166,14 @@ Inno Setup 6.7.3 환경에서 `scripts/package-release.ps1`을 직접 실행하�
 | 5. 오류/네트워크 | 5 | 0 | 0 |
 | 6. 응답 품질 | 5 | 0 | 1 |
 | 7. 패키징 | 5 | 0 | 0 |
+
+### 근거 구분
+
+| 구분 | 건수 | 내용 |
+|---|---|---|
+| 실측 근거 있음 | 약 25 | 런타임 로그, 실제 API 40회, 실제 무인 설치, 스크립트 실행 결과 |
+| 자동 테스트가 로직을 보증 | 약 17 | 264개 automated test (P11/P12/E3/K5 등) |
+| **사람이 직접 해야 함** | 약 13 | `doc/QuickActionPalette_ManualProcedure.md` 참조 |
 
 최종 판정:
 
