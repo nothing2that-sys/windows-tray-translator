@@ -57,6 +57,15 @@ public sealed class SettingsForm : Form
         Text = "번역 완료 후 다른 모델로 다시 번역할 수 있게 표시",
         AutoSize = true
     };
+    private readonly CheckBox actionModelCheckBox = new()
+    {
+        Text = "Quick Action(요약·다듬기·번역 후 요약)에 다른 모델 사용",
+        AutoSize = true
+    };
+    private readonly ComboBox actionModelComboBox = CreateEditableCombo(
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash");
 
     public SettingsForm(ApplicationController controller)
     {
@@ -80,6 +89,8 @@ public sealed class SettingsForm : Form
             new ReplaceFormatOption("줄바꿈 병기 — Hello. 다음 줄에 (안녕하세요.)", ReplaceOutputFormat.TranslationAndOriginalOnNewLine)
         ]);
         replaceFormatCombo.SelectedIndexChanged += (_, _) => UpdateReplaceFormatPreview();
+        actionModelCheckBox.CheckedChanged += (_, _) =>
+            actionModelComboBox.Enabled = actionModelCheckBox.Checked;
         fallbackModelCheckBox.CheckedChanged += (_, _) =>
         {
             fallbackModelComboBox.Enabled = fallbackModelCheckBox.Checked;
@@ -306,6 +317,16 @@ public sealed class SettingsForm : Form
         AddRow(table, "모델", modelComboBox);
         AppTheme.StyleSecondaryButton(refreshModelsButton);
         AddFullRow(table, refreshModelsButton);
+        AddSectionRow(table, "Quick Action 모델");
+        AddFullRow(table, actionModelCheckBox);
+        AddRow(table, "Quick Action 모델", actionModelComboBox);
+        AddFullRow(table, new Label
+        {
+            Text = "요약은 번역보다 더 큰 모델이 필요합니다. 요약이 핵심을 잃고 단어만 남으면 여기서 상위 모델을 지정하세요.",
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+            MaximumSize = new Size(600, 0)
+        });
         AddSectionRow(table, "안정성 옵션");
         AddFullRow(table, fallbackModelCheckBox);
         AddRow(table, "보조 모델", fallbackModelComboBox);
@@ -370,6 +391,9 @@ public sealed class SettingsForm : Form
         fallbackModelComboBox.Enabled = fallbackModelCheckBox.Checked;
         fallbackAfterCompletionCheckBox.Checked = settings.Api.OfferFallbackAfterCompletion;
         fallbackAfterCompletionCheckBox.Enabled = fallbackModelCheckBox.Checked;
+        actionModelCheckBox.Checked = settings.Api.EnableActionModel;
+        actionModelComboBox.Text = settings.Api.ActionModel;
+        actionModelComboBox.Enabled = actionModelCheckBox.Checked;
         RefreshSavedKeyLabel();
     }
 
@@ -435,7 +459,9 @@ public sealed class SettingsForm : Form
             TransientRetryCount = (int)transientRetryNumeric.Value,
             EnableFallbackModel = fallbackModelCheckBox.Checked,
             FallbackModel = fallbackModelComboBox.Text,
-            OfferFallbackAfterCompletion = fallbackAfterCompletionCheckBox.Checked
+            OfferFallbackAfterCompletion = fallbackAfterCompletionCheckBox.Checked,
+            EnableActionModel = actionModelCheckBox.Checked,
+            ActionModel = actionModelComboBox.Text
         }
     };
 
@@ -480,10 +506,14 @@ public sealed class SettingsForm : Form
 
             string current = modelComboBox.Text;
             string fallback = fallbackModelComboBox.Text;
+            string action = actionModelComboBox.Text;
             modelComboBox.Items.Clear();
             fallbackModelComboBox.Items.Clear();
+            actionModelComboBox.Items.Clear();
             modelComboBox.Items.AddRange(result.Models.Cast<object>().ToArray());
             fallbackModelComboBox.Items.AddRange(result.Models.Cast<object>().ToArray());
+            actionModelComboBox.Items.AddRange(result.Models.Cast<object>().ToArray());
+            actionModelComboBox.Text = action;
             modelComboBox.Text = current;
             fallbackModelComboBox.Text = fallback;
             SetStatus($"번역 가능한 모델 {result.Models.Count}개를 불러왔습니다.", isError: false);

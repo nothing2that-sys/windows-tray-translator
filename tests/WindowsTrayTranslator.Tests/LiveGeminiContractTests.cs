@@ -26,7 +26,17 @@ public sealed class LiveGeminiContractTests
     public Task G_Summarize_MeetsOutputContract() =>
         RunContractAsync(BuiltInActionKind.Summarize);
 
-    private static async Task RunContractAsync(BuiltInActionKind kind)
+    /// <summary>
+    /// Only the second step of the translate-then-summarize pipeline is measured here: the Korean
+    /// sample is handed to the summary prompt with an English target, which is exactly the case
+    /// where the model may drift back into the source language. The translation step itself is
+    /// already covered by the translation contract.
+    /// </summary>
+    [LiveGeminiFact]
+    public Task G_SummarizeTranslated_MeetsOutputContract() =>
+        RunContractAsync(BuiltInActionKind.SummarizeTranslated, "English");
+
+    private static async Task RunContractAsync(BuiltInActionKind kind, string? targetLanguage = null)
     {
         int iterations = ReadInt("WTT_LIVE_ITERATIONS", 20);
         double threshold = ReadInt("WTT_LIVE_THRESHOLD_PERCENT", 95) / 100.0;
@@ -36,6 +46,13 @@ public sealed class LiveGeminiContractTests
         // so the shared 95% bar would have let it through.
         double languageThreshold = ReadInt("WTT_LIVE_LANGUAGE_THRESHOLD_PERCENT", 100) / 100.0;
         string input = BuildSample(ReadInt("WTT_LIVE_INPUT_CHARS", 4500));
+
+        // The sample is Korean, so the expected output language is the configured target when the
+        // action declares one, and the source language otherwise.
+        bool expectKorean = targetLanguage is null
+            ? AutomaticTargetLanguageResolver.IsKoreanDominant(input)
+            : string.Equals(targetLanguage, "Korean", StringComparison.OrdinalIgnoreCase);
+        string languageLabel = targetLanguage is null ? "원문 언어 유지" : $"대상 언어({targetLanguage}) 준수";
 
         AppPaths paths = AppPaths.CreateDefault();
         TestLogger logger = new();
@@ -64,7 +81,7 @@ public sealed class LiveGeminiContractTests
             }
 
             TranslationResult result = await provider.GenerateAsync(
-                PromptComposer.Compose(kind, input),
+                PromptComposer.Compose(kind, input, targetLanguage),
                 CancellationToken.None);
 
             // One retry after a rate limit, so a throttled call does not cost a sample.
@@ -72,14 +89,19 @@ public sealed class LiveGeminiContractTests
             {
                 await Task.Delay(ReadInt("WTT_LIVE_RATELIMIT_BACKOFF_MS", 20000));
                 result = await provider.GenerateAsync(
-                    PromptComposer.Compose(kind, input),
+                    PromptComposer.Compose(kind, input, targetLanguage),
                     CancellationToken.None);
             }
 
-            observations.Add(Observation.From(index, input, result));
+            observations.Add(Observation.From(index, input, result, expectKorean));
         }
 
-        string reportPath = WriteReport(kind, input, observations, settings.Api.Model);
+        string reportPath = WriteReport(
+            kind,
+            input,
+            observations,
+            GeminiTranslationProvider.ResolveActionModel(settings.Api),
+            languageLabel);
 
         // A shrunken sample must not look like a pass: the rates below are computed over successes
         // only, so require most of the planned iterations to have produced a real answer.
@@ -91,9 +113,11 @@ public sealed class LiveGeminiContractTests
         // G5 - a leaked internal marker is a defect we control, so it must never happen.
         Assert.Equal(0, observations.Count(o => o.HasMarker));
 
-        AssertRate(observations, o => o.KeepsSourceLanguage, languageThreshold, "원문 언어 유지", reportPath);
+        AssertRate(observations, o => o.KeepsExpectedLanguage, languageThreshold, languageLabel, reportPath);
         AssertRate(observations, o => o.IsCleanText, threshold, "라벨/코드펜스 없음", reportPath);
 
+        // Only the same-language summary has a meaningful character-count bar: a Korean source
+        // summarized into English can grow per character even when it is a real summary.
         if (kind == BuiltInActionKind.Summarize)
         {
             AssertRate(observations, o => o.LengthRatio < 1.0, threshold, "요약이 원문보다 짧음", reportPath);
@@ -119,7 +143,8 @@ public sealed class LiveGeminiContractTests
         BuiltInActionKind kind,
         string input,
         IReadOnlyList<Observation> observations,
-        string model)
+        string model,
+        string languageLabel)
     {
         string directory = Path.Combine(FindRepositoryRoot(), "artifacts", "verification");
         Directory.CreateDirectory(directory);
@@ -136,13 +161,13 @@ public sealed class LiveGeminiContractTests
         report.AppendLine($"- 입력 길이: {input.Length}자");
         report.AppendLine($"- 반복: {observations.Count}회 (성공 {succeeded.Length}회)");
         report.AppendLine();
-        report.AppendLine("| # | 성공 | 출력자수 | 길이비 | 원문언어유지 | 라벨/펜스없음 | marker |");
+        report.AppendLine($"| # | 성공 | 출력자수 | 길이비 | {languageLabel} | 라벨/펜스없음 | marker |");
         report.AppendLine("|---|---|---|---|---|---|---|");
         foreach (Observation o in observations)
         {
             report.AppendLine(
                 $"| {o.Index} | {(o.IsSuccess ? "O" : "X " + o.FailureKind)} | {o.OutputLength} | " +
-                $"{o.LengthRatio:F2} | {Mark(o.KeepsSourceLanguage)} | {Mark(o.IsCleanText)} | {(o.HasMarker ? "유출" : "없음")} |");
+                $"{o.LengthRatio:F2} | {Mark(o.KeepsExpectedLanguage)} | {Mark(o.IsCleanText)} | {(o.HasMarker ? "유출" : "없음")} |");
         }
 
         if (succeeded.Length > 0)
@@ -150,7 +175,7 @@ public sealed class LiveGeminiContractTests
             report.AppendLine();
             report.AppendLine("## 집계");
             report.AppendLine();
-            report.AppendLine($"- 원문 언어 유지: {succeeded.Count(o => o.KeepsSourceLanguage)}/{succeeded.Length}");
+            report.AppendLine($"- {languageLabel}: {succeeded.Count(o => o.KeepsExpectedLanguage)}/{succeeded.Length}");
             report.AppendLine($"- 라벨/코드펜스 없음: {succeeded.Count(o => o.IsCleanText)}/{succeeded.Length}");
             report.AppendLine($"- marker 유출: {observations.Count(o => o.HasMarker)}회");
             report.AppendLine($"- 길이비 최소/중앙/최대: {succeeded.Min(o => o.LengthRatio):F2} / " +
@@ -211,11 +236,11 @@ public sealed class LiveGeminiContractTests
         TranslationFailureKind FailureKind,
         int OutputLength,
         double LengthRatio,
-        bool KeepsSourceLanguage,
+        bool KeepsExpectedLanguage,
         bool IsCleanText,
         bool HasMarker)
     {
-        public static Observation From(int index, string input, TranslationResult result)
+        public static Observation From(int index, string input, TranslationResult result, bool expectKorean)
         {
             if (!result.IsSuccess)
             {
@@ -229,7 +254,7 @@ public sealed class LiveGeminiContractTests
                 TranslationFailureKind.None,
                 output.Length,
                 (double)output.Length / input.Length,
-                AutomaticTargetLanguageResolver.IsKoreanDominant(output) == AutomaticTargetLanguageResolver.IsKoreanDominant(input),
+                AutomaticTargetLanguageResolver.IsKoreanDominant(output) == expectKorean,
                 IsCleanOutput(output),
                 output.Contains(MarkerFragment, StringComparison.Ordinal));
         }

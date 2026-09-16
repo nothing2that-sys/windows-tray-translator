@@ -54,4 +54,8 @@ public sealed class ApiSettings
     public bool EnableFallbackModel { get; set; }
     public string FallbackModel { get; set; } = "gemini-3.1-flash-lite";
     public bool OfferFallbackAfterCompletion { get; set; }
+    // Quick Action generation (rewrite, summary, translated summary) may use a stronger model than
+    // translation: a lite model compresses a summary into keywords instead of keeping the meaning.
+    public bool EnableActionModel { get; set; }
+    public string ActionModel { get; set; } = "gemini-3.5-flash";
 }

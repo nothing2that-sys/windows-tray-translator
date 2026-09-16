@@ -237,6 +237,97 @@ public sealed class GenerationSeamTests
         Assert.Contains("same language as the source text", system, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Regression guard for the reported defect: the summary came back as a keyword list that had
+    /// dropped the meaning. Both summary actions must demand whole sentences and name the facts
+    /// that have to survive, or the model compresses wording instead of content.
+    /// </summary>
+    [Fact]
+    public void Compose_SummarizePrompt_DemandsSentencesAndKeepsTheSubstance() =>
+        AssertSummaryTaskKeepsSubstance(BuiltInActionKind.Summarize);
+
+    [Fact]
+    public void Compose_TranslatedSummaryPrompt_DemandsSentencesAndKeepsTheSubstance() =>
+        AssertSummaryTaskKeepsSubstance(BuiltInActionKind.SummarizeTranslated);
+
+    private static void AssertSummaryTaskKeepsSubstance(BuiltInActionKind kind)
+    {
+        string system = PromptComposer.Compose(kind, "원문", "Korean").SystemPrompt;
+
+        Assert.Contains("complete, grammatical sentences", system, StringComparison.Ordinal);
+        Assert.Contains("Never answer with keywords", system, StringComparison.Ordinal);
+        Assert.Contains("names, numbers, dates, decisions, causes, and conclusions", system, StringComparison.Ordinal);
+        Assert.Contains("at least two sentences", system, StringComparison.Ordinal);
+        Assert.Contains("not in the source", system, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Compose_TranslatedSummary_AnchorsTheOutputLanguageInBothPrompts()
+    {
+        PromptPlan plan = PromptComposer.Compose(BuiltInActionKind.SummarizeTranslated, "원문", "English");
+
+        Assert.Contains("Write the summary in English", plan.SystemPrompt, StringComparison.Ordinal);
+        Assert.Contains("in English", plan.UserPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("same language as the source text", plan.SystemPrompt, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("Auto")]
+    public void Compose_TranslatedSummary_RejectsAnUnresolvedTargetLanguage(string? targetLanguage)
+    {
+        Assert.Throws<ArgumentException>(
+            () => PromptComposer.Compose(BuiltInActionKind.SummarizeTranslated, "원문", targetLanguage));
+    }
+
+    [Fact]
+    public void ResolveActionModel_UsesTheQuickActionModelOnlyWhenEnabledAndFilled()
+    {
+        ApiSettings api = new() { Model = "gemini-primary", ActionModel = "gemini-action" };
+
+        Assert.Equal("gemini-primary", GeminiTranslationProvider.ResolveActionModel(api));
+
+        api.EnableActionModel = true;
+        Assert.Equal("gemini-action", GeminiTranslationProvider.ResolveActionModel(api));
+
+        api.ActionModel = "   ";
+        Assert.Equal("gemini-primary", GeminiTranslationProvider.ResolveActionModel(api));
+    }
+
+    [Fact]
+    public async Task Provider_GenerateAsync_UsesTheQuickActionModelWhileTranslationKeepsThePrimary()
+    {
+        List<string> requestedModels = [];
+        Handler handler = new(request =>
+        {
+            requestedModels.Add(request.RequestUri!.ToString());
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"결과\"}]}}]}")
+            };
+        });
+        AppSettings settings = new();
+        settings.Api.Model = "gemini-primary";
+        settings.Api.EnableActionModel = true;
+        settings.Api.ActionModel = "gemini-action";
+        GeminiTranslationProvider provider = new(
+            new GeminiApiClient(new HttpClient(handler), new TestLogger()),
+            new FakeSecretStore(),
+            () => settings);
+
+        Assert.True((await provider.GenerateAsync(
+            PromptComposer.Compose(BuiltInActionKind.Summarize, "원문"),
+            CancellationToken.None)).IsSuccess);
+        Assert.True((await provider.TranslateAsync(
+            new TranslationRequest("원문", "English"),
+            CancellationToken.None)).IsSuccess);
+
+        Assert.Contains("gemini-action", requestedModels[0], StringComparison.Ordinal);
+        Assert.Contains("gemini-primary", requestedModels[1], StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Compose_PassesSelectedTextAsDataBlockNotInstruction()
     {

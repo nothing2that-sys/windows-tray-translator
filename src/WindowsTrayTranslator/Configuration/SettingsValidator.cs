@@ -61,6 +61,7 @@ public static class SettingsValidator
         settings.Api.Provider = "Gemini";
         settings.Api.Model = NonEmpty(settings.Api.Model, "gemini-3.5-flash-lite");
         settings.Api.FallbackModel = NonEmpty(settings.Api.FallbackModel, "gemini-3.1-flash-lite");
+        settings.Api.ActionModel = NonEmpty(settings.Api.ActionModel, "gemini-3.5-flash");
         return settings;
     }
 

@@ -146,6 +146,10 @@ public sealed class ApplicationController : IDisposable
         candidate = CloneSettings(candidate);
         SettingsValidator.Normalize(candidate);
         GeminiModelPolicy.EnsureUsable(candidate.Api.Model);
+        if (candidate.Api.EnableActionModel)
+        {
+            GeminiModelPolicy.EnsureUsable(candidate.Api.ActionModel);
+        }
         if (candidate.Api.EnableFallbackModel)
         {
             GeminiModelPolicy.EnsureUsable(candidate.Api.FallbackModel);
@@ -542,9 +546,7 @@ public sealed class ApplicationController : IDisposable
                         title: PromptComposer.DisplayName(kind));
                 }
 
-                return directTranslationProvider.GenerateAsync(
-                    PromptComposer.Compose(kind, selectedText),
-                    token);
+                return GenerateActionResultAsync(kind, selectedText, token);
             },
             cancellation,
             () => IsCurrentPaletteOperation(operationId),
@@ -556,6 +558,78 @@ public sealed class ApplicationController : IDisposable
             },
             () => CompletePaletteOperation(operationId, cancellation),
             logger);
+
+    /// <summary>
+    /// A translated summary is two steps, not one instruction: the selection is translated through
+    /// the normal translation path first, and only the translation is summarized. Summarizing and
+    /// translating in a single call is what a small model collapses into a keyword list.
+    /// The translation failure is returned as-is, so the user sees why it stopped.
+    /// </summary>
+    private async Task<TranslationResult> GenerateActionResultAsync(
+        BuiltInActionKind kind,
+        string selectedText,
+        CancellationToken cancellationToken)
+    {
+        if (kind != BuiltInActionKind.SummarizeTranslated)
+        {
+            return await directTranslationProvider.GenerateAsync(
+                PromptComposer.Compose(kind, selectedText),
+                cancellationToken);
+        }
+
+        string targetLanguage = ResolveSummaryTargetLanguage(Settings, selectedText);
+        string summarySource = selectedText;
+        if (ShouldTranslateBeforeSummary(targetLanguage, selectedText))
+        {
+            TranslationResult translated = await directTranslationProvider.TranslateAsync(
+                new TranslationRequest(selectedText, targetLanguage),
+                cancellationToken);
+            if (!translated.IsSuccess)
+            {
+                return translated;
+            }
+
+            summarySource = translated.TranslatedText!;
+        }
+
+        return await directTranslationProvider.GenerateAsync(
+            PromptComposer.Compose(kind, summarySource, targetLanguage),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// The summary language follows the read translation setting. "Select" is not carried over: the
+    /// palette is a mouse-only menu that already took a click, so a second chooser on top of the
+    /// progress popup is avoided and the language last chosen for reading is used instead. "Auto"
+    /// is resolved from the text exactly as reading resolves it.
+    /// </summary>
+    internal static string ResolveSummaryTargetLanguage(AppSettings settings, string selectedText)
+    {
+        string configured = settings.Translation.ReadTargetLanguage?.Trim() ?? string.Empty;
+        if (IsSelectPlaceholder(configured))
+        {
+            configured = settings.Translation.ReadRecentTargetLanguage?.Trim() ?? string.Empty;
+        }
+
+        if (IsSelectPlaceholder(configured) || string.IsNullOrEmpty(configured))
+        {
+            configured = "Korean";
+        }
+
+        return AutomaticTargetLanguageResolver.Resolve(configured, selectedText);
+    }
+
+    private static bool IsSelectPlaceholder(string value) =>
+        string.Equals(value, "Select", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Skips a Korean-to-Korean round trip, which costs a call and can only degrade the text. Any
+    /// other pair is translated: only Korean can be detected here, so an English selection with an
+    /// English target is still sent through translation rather than guessed at.
+    /// </summary>
+    internal static bool ShouldTranslateBeforeSummary(string targetLanguage, string selectedText) =>
+        !(string.Equals(targetLanguage.Trim(), "Korean", StringComparison.OrdinalIgnoreCase) &&
+            AutomaticTargetLanguageResolver.IsKoreanDominant(selectedText));
 
     /// <summary>
     /// Owns the generation lifecycle. Every exit path - success, failure, staleness, cancellation

@@ -60,6 +60,7 @@ internal sealed class QuickActionPaletteForm : Form
 
         AddActionButton(content, BuiltInActionKind.RewriteNatural);
         AddActionButton(content, BuiltInActionKind.Summarize);
+        AddActionButton(content, BuiltInActionKind.SummarizeTranslated);
 
         Button close = CreateButton("닫기");
         close.ForeColor = Color.FromArgb(190, 198, 214);

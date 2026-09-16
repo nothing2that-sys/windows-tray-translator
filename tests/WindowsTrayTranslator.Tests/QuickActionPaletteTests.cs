@@ -164,7 +164,44 @@ public sealed class QuickActionPaletteTests
 
         Assert.Equal("자연스럽게 다듬기", PromptComposer.DisplayName(BuiltInActionKind.RewriteNatural));
         Assert.Equal("요약", PromptComposer.DisplayName(BuiltInActionKind.Summarize));
-        Assert.Equal(2, Enum.GetValues<BuiltInActionKind>().Length);
+        Assert.Equal("번역 후 요약", PromptComposer.DisplayName(BuiltInActionKind.SummarizeTranslated));
+        Assert.Equal(3, Enum.GetValues<BuiltInActionKind>().Length);
+    }
+
+    /// <summary>
+    /// The only pair that may skip the translation step is Korean source with a Korean target: any
+    /// other combination must be translated, because only Korean is detectable here.
+    /// </summary>
+    [Fact]
+    public void TranslatedSummary_SkipsOnlyTheKoreanToKoreanRoundTrip()
+    {
+        Assert.False(ApplicationController.ShouldTranslateBeforeSummary("Korean", "이번 분기 가동률은 목표치를 밑돌았습니다."));
+        Assert.True(ApplicationController.ShouldTranslateBeforeSummary("English", "이번 분기 가동률은 목표치를 밑돌았습니다."));
+        Assert.True(ApplicationController.ShouldTranslateBeforeSummary("Korean", "The utilization rate missed the target this quarter."));
+        Assert.True(ApplicationController.ShouldTranslateBeforeSummary("Japanese", "稼働率は目標を下回りました。"));
+    }
+
+    /// <summary>
+    /// "Select" would be sent to the API verbatim if it leaked through, so it must resolve to a real
+    /// language without opening a second chooser during a palette action.
+    /// </summary>
+    [Fact]
+    public void TranslatedSummary_ResolvesTheReadLanguageIncludingSelectAndAuto()
+    {
+        AppSettings settings = new();
+        settings.Translation.ReadTargetLanguage = "Japanese";
+        Assert.Equal("Japanese", ApplicationController.ResolveSummaryTargetLanguage(settings, "any text"));
+
+        settings.Translation.ReadTargetLanguage = "Auto";
+        Assert.Equal("English", ApplicationController.ResolveSummaryTargetLanguage(settings, "\uc774\ubc88 \ubd84\uae30 \uac00\ub3d9\ub960\uc740 \ubaa9\ud45c\uce58\ub97c \ubc11\ub3cc\uc558\uc2b5\ub2c8\ub2e4."));
+        Assert.Equal("Korean", ApplicationController.ResolveSummaryTargetLanguage(settings, "The utilization rate missed the target."));
+
+        settings.Translation.ReadTargetLanguage = "Select";
+        settings.Translation.ReadRecentTargetLanguage = "Vietnamese";
+        Assert.Equal("Vietnamese", ApplicationController.ResolveSummaryTargetLanguage(settings, "any text"));
+
+        settings.Translation.ReadRecentTargetLanguage = "Select";
+        Assert.Equal("Korean", ApplicationController.ResolveSummaryTargetLanguage(settings, "any text"));
     }
 
     private sealed class GateSpy(bool available)

@@ -53,7 +53,7 @@ public sealed class GeminiTranslationProvider : ITranslationProvider
         CancellationToken cancellationToken)
     {
         AppSettings settings = settingsAccessor();
-        string model = settings.Api.Model;
+        string model = ResolveActionModel(settings.Api);
         if (TryResolveApiKey(model, out string apiKey, out TranslationResult? failure))
         {
             return Task.FromResult(failure!);
@@ -98,6 +98,16 @@ public sealed class GeminiTranslationProvider : ITranslationProvider
             settings.Api.TransientRetryCount,
             cancellationToken);
     }
+
+    /// <summary>
+    /// Quick Action generation runs on its own model when one is configured, because a summary needs
+    /// more capability than a translation. A blank value falls back to the translation model instead
+    /// of failing, so an empty box can never disable the actions.
+    /// </summary>
+    internal static string ResolveActionModel(ApiSettings api) =>
+        api.EnableActionModel && !string.IsNullOrWhiteSpace(api.ActionModel)
+            ? api.ActionModel
+            : api.Model;
 
     /// <summary>Reads the stored key once and applies the shared model policy.</summary>
     private bool TryResolveApiKey(string model, out string apiKey, out TranslationResult? failure)
