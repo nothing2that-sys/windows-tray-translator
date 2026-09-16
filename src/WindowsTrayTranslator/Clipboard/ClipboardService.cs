@@ -7,19 +7,24 @@ using WindowsTrayTranslator.Windows;
 
 namespace WindowsTrayTranslator.Clipboard;
 
-public sealed class ClipboardService : IClipboardService
+public class ClipboardService : IClipboardService
 {
     private int retryCount;
     private int retryDelayMs;
-    private readonly KeyboardInputService keyboard;
+    private readonly IKeyboardInputService keyboard;
     private readonly ILogger logger;
 
-    public ClipboardService(int retryCount, int retryDelayMs, KeyboardInputService keyboard, ILogger logger)
+    public ClipboardService(int retryCount, int retryDelayMs, IKeyboardInputService keyboard, ILogger logger)
     {
         this.retryCount = retryCount;
         this.retryDelayMs = retryDelayMs;
         this.keyboard = keyboard;
         this.logger = logger;
+    }
+
+    public ClipboardService(int retryCount, int retryDelayMs, KeyboardInputService keyboard, ILogger logger)
+        : this(retryCount, retryDelayMs, (IKeyboardInputService)keyboard, logger)
+    {
     }
 
     public void Configure(int newRetryCount, int newRetryDelayMs)
@@ -28,7 +33,7 @@ public sealed class ClipboardService : IClipboardService
         retryDelayMs = Math.Clamp(newRetryDelayMs, 10, 1000);
     }
 
-    public ClipboardSnapshot CaptureSnapshot()
+    public virtual ClipboardSnapshot CaptureSnapshot()
     {
         EnsureStaThread();
         IDataObject? source = Retry(() => System.Windows.Forms.Clipboard.GetDataObject());
@@ -75,7 +80,7 @@ public sealed class ClipboardService : IClipboardService
         return new ClipboardSnapshot(formats);
     }
 
-    public void Restore(ClipboardSnapshot snapshot)
+    public virtual void Restore(ClipboardSnapshot snapshot)
     {
         EnsureStaThread();
         if (snapshot.IsEmpty)
@@ -101,7 +106,7 @@ public sealed class ClipboardService : IClipboardService
         });
     }
 
-    public void Clear()
+    public virtual void Clear()
     {
         EnsureStaThread();
         Retry(() =>
@@ -111,19 +116,19 @@ public sealed class ClipboardService : IClipboardService
         });
     }
 
-    public bool ContainsText()
+    public virtual bool ContainsText()
     {
         EnsureStaThread();
         return Retry(() => System.Windows.Forms.Clipboard.ContainsText(TextDataFormat.UnicodeText));
     }
 
-    public string GetText()
+    public virtual string GetText()
     {
         EnsureStaThread();
         return Retry(() => System.Windows.Forms.Clipboard.GetText(TextDataFormat.UnicodeText));
     }
 
-    public void SetText(string text)
+    public virtual void SetText(string text)
     {
         EnsureStaThread();
         Retry(() =>
@@ -133,9 +138,22 @@ public sealed class ClipboardService : IClipboardService
         });
     }
 
-    public uint GetSequenceNumber() => NativeClipboardMethods.GetClipboardSequenceNumber();
+    public virtual uint GetSequenceNumber() => NativeClipboardMethods.GetClipboardSequenceNumber();
 
     public async Task<PasteTextResult> PasteTextAsync(
+        string text,
+        ClipboardSnapshot snapshotToRestore,
+        int restoreDelayMs,
+        Func<bool> isTargetStillActive,
+        CancellationToken cancellationToken) =>
+        (await PasteTextWithOutcomeAsync(
+            text,
+            snapshotToRestore,
+            restoreDelayMs,
+            isTargetStillActive,
+            cancellationToken)).Status;
+
+    public async Task<PasteTextOutcome> PasteTextWithOutcomeAsync(
         string text,
         ClipboardSnapshot snapshotToRestore,
         int restoreDelayMs,
@@ -149,40 +167,55 @@ public sealed class ClipboardService : IClipboardService
 
         if (!isTargetStillActive())
         {
-            return PasteTextResult.TargetChanged;
+            return new PasteTextOutcome(PasteTextResult.TargetChanged);
         }
 
         uint expectedSequence = 0;
+        bool clipboardWriteAttempted = false;
+        PasteTextResult status = PasteTextResult.Success;
+        bool restoreOk = true;
         try
         {
+            clipboardWriteAttempted = true;
             SetText(text);
             expectedSequence = GetSequenceNumber();
             if (!isTargetStillActive())
             {
-                return PasteTextResult.TargetChanged;
+                status = PasteTextResult.TargetChanged;
             }
-
-            if (GetSequenceNumber() != expectedSequence)
+            else if (GetSequenceNumber() != expectedSequence)
             {
                 logger.Warning("붙여넣기 전에 클립보드가 외부에서 변경되어 자동 치환을 취소합니다.");
-                return PasteTextResult.ClipboardChanged;
+                status = PasteTextResult.ClipboardChanged;
             }
-
-            keyboard.SendPaste();
-            await Task.Delay(restoreDelayMs, cancellationToken);
-            return PasteTextResult.Success;
+            else
+            {
+                keyboard.SendPaste();
+                await Task.Delay(restoreDelayMs, cancellationToken);
+            }
         }
         finally
         {
-            if (ClipboardRestoreGuard.ShouldRestore(expectedSequence, GetSequenceNumber()))
+            if ((expectedSequence == 0 && clipboardWriteAttempted) ||
+                ClipboardRestoreGuard.ShouldRestore(expectedSequence, GetSequenceNumber()))
             {
-                Restore(snapshotToRestore);
+                try
+                {
+                    Restore(snapshotToRestore);
+                }
+                catch (Exception ex)
+                {
+                    restoreOk = false;
+                    logger.Error("붙여넣기 후 기존 클립보드를 복원하지 못했습니다.", ex);
+                }
             }
             else if (expectedSequence != 0)
             {
                 logger.Warning("붙여넣기 대기 중 클립보드가 변경되어 기존 스냅샷 복원을 생략합니다.");
             }
         }
+
+        return new PasteTextOutcome(status, restoreOk);
     }
 
     internal static class ClipboardRestoreGuard

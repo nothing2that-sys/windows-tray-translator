@@ -124,6 +124,12 @@ internal sealed class TranslationLayoutPreserver
         return result.ToString();
     }
 
+    /// <summary>
+    /// Used by marker-free generation to reject a leaked internal marker instead of silently
+    /// stripping it, which would also remove the output's leading indentation.
+    /// </summary>
+    internal static bool ContainsMarker(string text) => MarkerPattern.IsMatch(text);
+
     internal static string SanitizeOutput(string translatedText)
     {
         if (!MarkerPattern.IsMatch(translatedText))

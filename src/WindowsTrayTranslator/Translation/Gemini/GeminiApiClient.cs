@@ -34,10 +34,57 @@ public sealed class GeminiApiClient
         this.logger = logger;
     }
 
-    public async Task<TranslationResult> TranslateAsync(
+    public Task<TranslationResult> TranslateAsync(
         string apiKey,
         string model,
         TranslationRequest request,
+        int timeoutSeconds,
+        int transientRetryCount,
+        CancellationToken cancellationToken)
+    {
+        // Translation keeps its own system prompt, target-language instruction and exact-line markers.
+        TranslationLayoutPreserver layout = TranslationLayoutPreserver.Prepare(request.OriginalText);
+        return SendAsync(
+            apiKey,
+            model,
+            BuildSystemPrompt(request.Preferences),
+            BuildTranslationUserPrompt(request.TargetLanguage, layout.RequestText),
+            layout,
+            timeoutSeconds,
+            transientRetryCount,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Provider-neutral generation used by non-translation actions. The exact-line layout preserver
+    /// is bypassed entirely, so the output keeps its own indentation and a leaked internal marker is
+    /// reported as a failure. Markers stay with translation, which composes them over the selected
+    /// text only and therefore uses the shared core directly.
+    /// </summary>
+    public Task<TranslationResult> GenerateAsync(
+        string apiKey,
+        string model,
+        string systemPrompt,
+        string userPrompt,
+        int timeoutSeconds,
+        int transientRetryCount,
+        CancellationToken cancellationToken) =>
+        SendAsync(
+            apiKey,
+            model,
+            systemPrompt,
+            userPrompt,
+            layout: null,
+            timeoutSeconds,
+            transientRetryCount,
+            cancellationToken);
+
+    private async Task<TranslationResult> SendAsync(
+        string apiKey,
+        string model,
+        string systemPrompt,
+        string userPrompt,
+        TranslationLayoutPreserver? layout,
         int timeoutSeconds,
         int transientRetryCount,
         CancellationToken cancellationToken)
@@ -48,8 +95,7 @@ public sealed class GeminiApiClient
         }
 
         string endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(model)}:generateContent";
-        TranslationLayoutPreserver layout = TranslationLayoutPreserver.Prepare(request.OriginalText);
-        string payload = SerializeRequest(request with { OriginalText = layout.RequestText });
+        string payload = SerializeRequest(systemPrompt, userPrompt);
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
@@ -73,6 +119,21 @@ public sealed class GeminiApiClient
                     {
                         return result;
                     }
+                    if (layout is null)
+                    {
+                        // Marker-free generation: never sanitize, so indentation survives, and a
+                        // leaked internal marker is reported instead of being silently removed.
+                        if (TranslationLayoutPreserver.ContainsMarker(result.TranslatedText!))
+                        {
+                            logger.Warning("내부 줄 표식이 포함된 응답을 거부했습니다.");
+                            return TranslationResult.Failure(
+                                TranslationFailureKind.InvalidResponse,
+                                "서버 응답을 해석하지 못했습니다.");
+                        }
+
+                        return result;
+                    }
+
                     if (!layout.UsesMarkers)
                     {
                         return TranslationResult.Success(
@@ -99,11 +160,11 @@ public sealed class GeminiApiClient
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                return TranslationResult.Failure(TranslationFailureKind.Cancelled, "번역 요청이 취소되었습니다.");
+                return TranslationResult.Failure(TranslationFailureKind.Cancelled, "요청이 취소되었습니다.");
             }
             catch (OperationCanceledException)
             {
-                return TranslationResult.Failure(TranslationFailureKind.Timeout, "번역 요청 시간이 초과되었습니다.");
+                return TranslationResult.Failure(TranslationFailureKind.Timeout, "요청 시간이 초과되었습니다.");
             }
             catch (HttpRequestException ex) when (attempt < transientRetryCount)
             {
@@ -114,11 +175,11 @@ public sealed class GeminiApiClient
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    return TranslationResult.Failure(TranslationFailureKind.Cancelled, "번역 요청이 취소되었습니다.");
+                    return TranslationResult.Failure(TranslationFailureKind.Cancelled, "요청이 취소되었습니다.");
                 }
                 catch (OperationCanceledException)
                 {
-                    return TranslationResult.Failure(TranslationFailureKind.Timeout, "번역 요청 시간이 초과되었습니다.");
+                    return TranslationResult.Failure(TranslationFailureKind.Timeout, "요청 시간이 초과되었습니다.");
                 }
             }
             catch (HttpRequestException)
@@ -187,26 +248,23 @@ public sealed class GeminiApiClient
         }
     }
 
-    private static string SerializeRequest(TranslationRequest request)
+    internal static string BuildTranslationUserPrompt(string targetLanguage, string text) =>
+        $"Translation instruction: {BuildTargetLanguageInstruction(targetLanguage)}\n\nText:\n{text}";
+
+    private static string SerializeRequest(string systemPrompt, string userPrompt)
     {
         GeminiGenerateRequest payload = new()
         {
             SystemInstruction = new GeminiContent
             {
-                Parts = [new GeminiPart { Text = BuildSystemPrompt(request.Preferences) }]
+                Parts = [new GeminiPart { Text = systemPrompt }]
             },
             Contents =
             [
                 new GeminiContent
                 {
                     Role = "user",
-                    Parts =
-                    [
-                        new GeminiPart
-                        {
-                            Text = $"Translation instruction: {BuildTargetLanguageInstruction(request.TargetLanguage)}\n\nText:\n{request.OriginalText}"
-                        }
-                    ]
+                    Parts = [new GeminiPart { Text = userPrompt }]
                 }
             ]
         };
@@ -279,8 +337,8 @@ public sealed class GeminiApiClient
                 TranslationFailureKind.ModelUnavailable,
                 "설정한 Gemini 모델을 사용할 수 없습니다. 설정에서 모델명을 확인해 주세요."),
         _ when (int)response.StatusCode >= 500 =>
-            TranslationResult.Failure(TranslationFailureKind.Server, "번역 서버에서 오류가 발생했습니다."),
-        _ => TranslationResult.Failure(TranslationFailureKind.InvalidRequest, "번역 요청을 처리하지 못했습니다.")
+            TranslationResult.Failure(TranslationFailureKind.Server, "서버에서 오류가 발생했습니다."),
+        _ => TranslationResult.Failure(TranslationFailureKind.InvalidRequest, "요청을 처리하지 못했습니다.")
     };
 
     private static string BuildRateLimitMessage(HttpResponseMessage response, string body)

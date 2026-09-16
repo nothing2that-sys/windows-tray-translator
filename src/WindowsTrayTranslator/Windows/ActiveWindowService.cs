@@ -3,7 +3,13 @@ using System.Runtime.InteropServices;
 
 namespace WindowsTrayTranslator.Windows;
 
-public sealed class ActiveWindowService
+public interface IActiveWindowService
+{
+    WindowIdentity Capture();
+    bool IsStillActive(WindowIdentity expected);
+}
+
+public sealed class ActiveWindowService : IActiveWindowService
 {
     public WindowIdentity Capture()
     {

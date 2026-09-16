@@ -43,24 +43,40 @@ public sealed class GeminiTranslationProvider : ITranslationProvider
             cancellationToken);
     }
 
+    /// <summary>
+    /// Generic entry point for non-translation actions. It reuses the same API key, model policy,
+    /// timeout and retry settings as translation, so a caller never has to reach the client
+    /// directly. The fallback model is deliberately not reachable from here.
+    /// </summary>
+    internal Task<TranslationResult> GenerateAsync(
+        PromptPlan plan,
+        CancellationToken cancellationToken)
+    {
+        AppSettings settings = settingsAccessor();
+        string model = settings.Api.Model;
+        if (TryResolveApiKey(model, out string apiKey, out TranslationResult? failure))
+        {
+            return Task.FromResult(failure!);
+        }
+
+        return client.GenerateAsync(
+            apiKey,
+            model.Trim(),
+            plan.SystemPrompt,
+            plan.UserPrompt,
+            settings.Api.RequestTimeoutSeconds,
+            settings.Api.TransientRetryCount,
+            cancellationToken);
+    }
+
     public Task<TranslationResult> TranslateWithModelAsync(
         TranslationRequest request,
         string model,
         CancellationToken cancellationToken)
     {
-        string? apiKey = secretStore.ReadSecret(SecretNames.GeminiApiKey);
-        if (string.IsNullOrWhiteSpace(apiKey))
+        if (TryResolveApiKey(model, out string apiKey, out TranslationResult? failure))
         {
-            return Task.FromResult(TranslationResult.Failure(
-                TranslationFailureKind.MissingApiKey,
-                "Gemini API 키를 설정해 주세요."));
-        }
-
-        if (string.IsNullOrWhiteSpace(model) || GeminiModelPolicy.IsKnownRetired(model))
-        {
-            return Task.FromResult(TranslationResult.Failure(
-                TranslationFailureKind.ModelUnavailable,
-                "설정한 Gemini 모델을 사용할 수 없습니다. 설정에서 모델 목록을 새로고침해 주세요."));
+            return Task.FromResult(failure!);
         }
 
         AppSettings settings = settingsAccessor();
@@ -81,5 +97,29 @@ public sealed class GeminiTranslationProvider : ITranslationProvider
             settings.Api.RequestTimeoutSeconds,
             settings.Api.TransientRetryCount,
             cancellationToken);
+    }
+
+    /// <summary>Reads the stored key once and applies the shared model policy.</summary>
+    private bool TryResolveApiKey(string model, out string apiKey, out TranslationResult? failure)
+    {
+        apiKey = secretStore.ReadSecret(SecretNames.GeminiApiKey) ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            failure = TranslationResult.Failure(
+                TranslationFailureKind.MissingApiKey,
+                "Gemini API 키를 설정해 주세요.");
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(model) || GeminiModelPolicy.IsKnownRetired(model))
+        {
+            failure = TranslationResult.Failure(
+                TranslationFailureKind.ModelUnavailable,
+                "설정한 Gemini 모델을 사용할 수 없습니다. 설정에서 모델 목록을 새로고침해 주세요.");
+            return true;
+        }
+
+        failure = null;
+        return false;
     }
 }

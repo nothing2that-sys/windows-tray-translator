@@ -8,13 +8,23 @@ namespace WindowsTrayTranslator.Selection;
 
 public sealed class UiAutomationSelectedTextProvider : ISelectedTextProvider
 {
-    private readonly ActiveWindowService activeWindow;
+    private readonly IActiveWindowService activeWindow;
     private readonly ILogger logger;
+    private readonly Func<(bool IsSensitive, string? Text)> reader;
 
     public UiAutomationSelectedTextProvider(ActiveWindowService activeWindow, ILogger logger)
+        : this(activeWindow, logger, ReadFocusedSelection)
+    {
+    }
+
+    internal UiAutomationSelectedTextProvider(
+        IActiveWindowService activeWindow,
+        ILogger logger,
+        Func<(bool IsSensitive, string? Text)> reader)
     {
         this.activeWindow = activeWindow;
         this.logger = logger;
+        this.reader = reader;
     }
 
     public async Task<SelectedTextResult> GetSelectedTextAsync(
@@ -33,8 +43,16 @@ public sealed class UiAutomationSelectedTextProvider : ISelectedTextProvider
 
         try
         {
-            Task<string?> readTask = Task.Run(ReadFocusedSelection, CancellationToken.None);
-            string? text = await readTask.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), cancellationToken);
+            Task<(bool IsSensitive, string? Text)> readTask = Task.Run(reader, CancellationToken.None);
+            (bool isSensitive, string? text) = await readTask.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), cancellationToken);
+            if (isSensitive)
+            {
+                // A protected field must not be reported as a plain "no selection" failure, otherwise
+                // the composite provider would retry it through the clipboard.
+                logger.Warning($"UI Automation에서 보호된 입력 영역을 감지했습니다. Process={sourceWindow.ProcessName}");
+                return SelectedTextResult.Failure(SelectionMessages.SensitiveInput, sourceWindow, canFallback: false);
+            }
+
             if (string.IsNullOrWhiteSpace(text))
             {
                 logger.Warning($"UI Automation에서 선택 문자열을 찾지 못했습니다. Process={sourceWindow.ProcessName}");
@@ -69,29 +87,33 @@ public sealed class UiAutomationSelectedTextProvider : ISelectedTextProvider
         }
     }
 
-    private static string? ReadFocusedSelection()
+    private static (bool IsSensitive, string? Text) ReadFocusedSelection()
     {
         AutomationElement? focused = AutomationElement.FocusedElement;
-        if (focused is null ||
-            IsPasswordPropertyValue(focused.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty, true)))
+        if (focused is null)
         {
-            return null;
+            return (false, null);
+        }
+
+        if (IsPasswordPropertyValue(focused.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty, true)))
+        {
+            return (true, null);
         }
 
         if (!focused.TryGetCurrentPattern(TextPattern.Pattern, out object? patternObject) ||
             patternObject is not TextPattern textPattern)
         {
-            return null;
+            return (false, null);
         }
 
         TextPatternRange[] selections = textPattern.GetSelection();
         if (selections.Length == 0)
         {
-            return null;
+            return (false, null);
         }
 
         string text = string.Join(Environment.NewLine, selections.Select(range => range.GetText(-1)));
-        return string.IsNullOrWhiteSpace(text) ? null : text;
+        return (false, string.IsNullOrWhiteSpace(text) ? null : text);
     }
 
     internal static bool IsPasswordPropertyValue(object? value) => value is true;

@@ -9,6 +9,7 @@ using WindowsTrayTranslator.Startup;
 using WindowsTrayTranslator.Translation;
 using WindowsTrayTranslator.Translation.Gemini;
 using WindowsTrayTranslator.Windows;
+using System.Text.Json;
 
 namespace WindowsTrayTranslator.App;
 
@@ -30,8 +31,13 @@ public sealed class ApplicationController : IDisposable
     private readonly StartupRegistrationService startupRegistration;
     private readonly TranslationHistoryStore historyStore;
     private readonly SemaphoreSlim operationGate = new(1, 1);
+    private readonly ClipboardMutationCoordinator clipboardMutations = new();
     private readonly CancellationTokenSource shutdown = new();
     private readonly object translationInteractionSync = new();
+    private readonly object paletteSync = new();
+    private QuickActionSession? activePaletteSession;
+    private long paletteOperationId;
+    private CancellationTokenSource? paletteCancellation;
     private TranslationInteraction? activeTranslationInteraction;
     private long nextTranslationInteractionId;
 
@@ -54,7 +60,8 @@ public sealed class ApplicationController : IDisposable
             logger);
         activeWindow = new ActiveWindowService();
         inputAccess = new InputAccessService();
-        ISelectedTextProvider clipboardProvider = new ClipboardSelectedTextProvider(clipboard, keyboard, activeWindow, logger);
+        SensitiveInputProbe sensitiveProbe = new(logger);
+        ISelectedTextProvider clipboardProvider = new ClipboardSelectedTextProvider(clipboard, clipboardMutations, sensitiveProbe, keyboard, activeWindow, logger);
         ISelectedTextProvider uiAutomationProvider = new UiAutomationSelectedTextProvider(activeWindow, logger);
         clipboardFirstTextProvider = new CompositeSelectedTextProvider(clipboardProvider, uiAutomationProvider, logger);
         uiAutomationFirstTextProvider = new CompositeSelectedTextProvider(uiAutomationProvider, clipboardProvider, logger);
@@ -70,14 +77,19 @@ public sealed class ApplicationController : IDisposable
             settings.General.HistoryRetentionDays,
             logger);
         hotkeys = new GlobalHotkeyService(OnHotkeyPressed, logger);
-        try
+        IReadOnlyList<string> hotkeyFailures = hotkeys.RegisterStartup(
+            settings.Translation.ReadHotkey,
+            settings.Translation.ReplaceHotkey,
+            settings.Translation.ActionPaletteHotkey);
+        StartupWarning = string.Join(
+            Environment.NewLine,
+            new[] { configuration.LastLoadWarning }
+                .Where(message => !string.IsNullOrWhiteSpace(message))
+                .Concat(hotkeyFailures)
+                .Select(message => message!));
+        if (string.IsNullOrWhiteSpace(StartupWarning))
         {
-            hotkeys.Register(settings.Translation.ReadHotkey, settings.Translation.ReplaceHotkey);
-        }
-        catch (Exception ex)
-        {
-            logger.Error("전역 단축키를 등록하지 못했습니다.", ex);
-            StartupWarning = ex.Message;
+            StartupWarning = null;
         }
     }
 
@@ -86,6 +98,7 @@ public sealed class ApplicationController : IDisposable
     public event EventHandler<LanguageSelectionRequestedEventArgs>? LanguageSelectionRequested;
     public event EventHandler? SettingsApplied;
     public event EventHandler? TranslationHistoryChanged;
+    internal event EventHandler<QuickActionSession>? ActionPaletteRequested;
 
     public AppPaths Paths { get; }
     public AppSettings Settings { get; }
@@ -130,6 +143,8 @@ public sealed class ApplicationController : IDisposable
 
     public void ApplySettings(AppSettings candidate, string? newApiKey)
     {
+        candidate = CloneSettings(candidate);
+        SettingsValidator.Normalize(candidate);
         GeminiModelPolicy.EnsureUsable(candidate.Api.Model);
         if (candidate.Api.EnableFallbackModel)
         {
@@ -139,48 +154,75 @@ public sealed class ApplicationController : IDisposable
                 throw new InvalidOperationException("기본 모델과 보조 모델은 서로 달라야 합니다.");
             }
         }
-        HotkeyDefinition read = HotkeyDefinition.Parse(candidate.Translation.ReadHotkey);
-        HotkeyDefinition replace = HotkeyDefinition.Parse(candidate.Translation.ReplaceHotkey);
-        if (read == replace)
-        {
-            throw new InvalidOperationException("읽기 번역과 작성 번역에 같은 단축키를 사용할 수 없습니다.");
-        }
-
-        SettingsValidator.Normalize(candidate);
         AppSettings previous = CloneSettings(Settings);
         bool previousStartup = startupRegistration.IsEnabled();
         string? previousApiKey = secretStore.ReadSecret(SecretNames.GeminiApiKey);
         bool apiKeyChanged = !string.IsNullOrWhiteSpace(newApiKey);
 
-        try
+        List<SettingsApplyStep> steps = [];
+        if (apiKeyChanged)
         {
-            if (apiKeyChanged)
-            {
-                secretStore.WriteSecret(SecretNames.GeminiApiKey, newApiKey!);
-            }
-
-            hotkeys.Register(candidate.Translation.ReadHotkey, candidate.Translation.ReplaceHotkey);
-            startupRegistration.SetEnabled(candidate.General.RunAtWindowsStartup);
-            configuration.Save(candidate);
-            CopySettings(candidate, Settings);
-            clipboard.Configure(
-                Settings.Translation.ClipboardRetryCount,
-                Settings.Translation.ClipboardRetryDelayMs);
-            if (logger is FileLogger fileLogger)
-            {
-                fileLogger.Configure(Settings.General.EnableLogging, Settings.General.LogRetentionDays);
-            }
-            historyStore.Configure(
-                Settings.General.EnableTranslationHistory,
-                Settings.General.HistoryRetentionDays);
-
-            logger.Information("설정을 저장하고 즉시 적용했습니다.");
+            steps.Add(new SettingsApplyStep(
+                "API 키",
+                () => secretStore.WriteSecret(SecretNames.GeminiApiKey, newApiKey!),
+                () => RestoreApiKey(previousApiKey)));
         }
-        catch
+        steps.Add(new SettingsApplyStep(
+            "전역 단축키",
+            () => hotkeys.Register(
+                candidate.Translation.ReadHotkey,
+                candidate.Translation.ReplaceHotkey,
+                candidate.Translation.ActionPaletteHotkey),
+            () => hotkeys.Register(
+                previous.Translation.ReadHotkey,
+                previous.Translation.ReplaceHotkey,
+                previous.Translation.ActionPaletteHotkey)));
+        steps.Add(new SettingsApplyStep(
+            "시작 프로그램 설정",
+            () => startupRegistration.SetEnabled(candidate.General.RunAtWindowsStartup),
+            () => startupRegistration.SetEnabled(previousStartup)));
+        steps.Add(new SettingsApplyStep(
+            "설정 파일",
+            () => configuration.Save(candidate),
+            () => configuration.Save(previous)));
+        steps.Add(new SettingsApplyStep(
+            "클립보드 설정",
+            () => clipboard.Configure(
+                candidate.Translation.ClipboardRetryCount,
+                candidate.Translation.ClipboardRetryDelayMs),
+            () => clipboard.Configure(
+                previous.Translation.ClipboardRetryCount,
+                previous.Translation.ClipboardRetryDelayMs)));
+        if (logger is FileLogger fileLogger)
         {
-            TryRollbackSettings(previous, previousStartup, previousApiKey, apiKeyChanged);
-            throw;
+            steps.Add(new SettingsApplyStep(
+                "로그 설정",
+                () => fileLogger.Configure(candidate.General.EnableLogging, candidate.General.LogRetentionDays),
+                () => fileLogger.Configure(previous.General.EnableLogging, previous.General.LogRetentionDays)));
         }
+        steps.Add(new SettingsApplyStep(
+            "히스토리 설정",
+            () => historyStore.Configure(
+                candidate.General.EnableTranslationHistory,
+                candidate.General.HistoryRetentionDays),
+            () => historyStore.Configure(
+                previous.General.EnableTranslationHistory,
+                previous.General.HistoryRetentionDays)));
+        steps.Add(new SettingsApplyStep(
+            "설정 적용 로그",
+            () => logger.Information("설정을 저장하고 즉시 적용했습니다."),
+            () => { }));
+        steps.Add(new SettingsApplyStep(
+            "메모리 설정",
+            () => CopySettings(candidate, Settings),
+            () => CopySettings(previous, Settings)));
+
+        SettingsApplyTransaction.Execute(
+            steps,
+            (name, rollbackError) =>
+            {
+                logger.Error($"설정 변경 실패 후 {name}을(를) 복구하지 못했습니다.", rollbackError);
+            });
 
         try
         {
@@ -249,8 +291,23 @@ public sealed class ApplicationController : IDisposable
 
     private async Task ExecuteHotkeyAsync(int hotkeyId)
     {
+        if (!HotkeyCommandMap.TryResolve(hotkeyId, out HotkeyCommand command))
+        {
+            logger.Warning($"알 수 없는 전역 단축키 ID를 무시했습니다. Id={hotkeyId}");
+            return;
+        }
+
         if (!Settings.General.TranslationEnabled)
         {
+            return;
+        }
+
+        // Any new hotkey cancels and closes an open palette before its own command runs.
+        DismissActionPalette(null);
+
+        if (command == HotkeyCommand.ShowActionPalette)
+        {
+            await ShowActionPaletteAsync();
             return;
         }
 
@@ -262,7 +319,7 @@ public sealed class ApplicationController : IDisposable
 
         try
         {
-            bool isReadTranslation = hotkeyId == GlobalHotkeyService.ReadHotkeyId;
+            bool isReadTranslation = command == HotkeyCommand.ReadTranslation;
             InvalidateActiveTranslationInteraction();
             WindowIdentity sourceWindow = activeWindow.Capture();
             InputAccessResult access = inputAccess.Check(sourceWindow);
@@ -311,6 +368,11 @@ public sealed class ApplicationController : IDisposable
                 return;
             }
 
+            if (!result.ClipboardRestored)
+            {
+                Notify("선택 문자열은 가져왔지만 기존 클립보드를 복원하지 못했습니다.", ToolTipIcon.Warning);
+            }
+
             targetLanguage = AutomaticTargetLanguageResolver.Resolve(targetLanguage, result.Text!);
             if (isReadTranslation)
             {
@@ -328,7 +390,7 @@ public sealed class ApplicationController : IDisposable
         catch (Exception ex)
         {
             logger.Error("번역 작업 중 예기치 않은 오류가 발생했습니다.", ex);
-            if (hotkeyId == GlobalHotkeyService.ReadHotkeyId)
+            if (command == HotkeyCommand.ReadTranslation)
             {
                 ShowPopup(true, TranslationPopupKind.Error, "번역 작업 중 오류가 발생했습니다.");
             }
@@ -340,6 +402,293 @@ public sealed class ApplicationController : IDisposable
         finally
         {
             operationGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Captures the selection while holding the operation gate, then releases the gate so the
+    /// palette never blocks Alt+R/Alt+T while it is on screen.
+    /// </summary>
+    private async Task ShowActionPaletteAsync()
+    {
+        if (!await operationGate.WaitAsync(0))
+        {
+            Notify("현재 번역 작업이 진행 중입니다.", ToolTipIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            WindowIdentity sourceWindow = activeWindow.Capture();
+            InputAccessResult access = inputAccess.Check(sourceWindow);
+            if (!access.IsAllowed)
+            {
+                Notify(access.ErrorMessage!, ToolTipIcon.Warning);
+                return;
+            }
+
+            ISelectedTextProvider selectedTextProvider = Settings.Translation.PreferUiAutomation
+                ? uiAutomationFirstTextProvider
+                : clipboardFirstTextProvider;
+            SelectedTextResult result = await selectedTextProvider.GetSelectedTextAsync(
+                sourceWindow,
+                Settings.Translation.ClipboardCopyTimeoutMs,
+                Settings.Translation.MaxInputCharacters,
+                shutdown.Token);
+
+            if (!result.IsSuccess)
+            {
+                Notify(result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.", ToolTipIcon.Warning);
+                return;
+            }
+
+            if (!result.ClipboardRestored)
+            {
+                Notify("선택 문자열은 가져왔지만 기존 클립보드를 복원하지 못했습니다.", ToolTipIcon.Warning);
+            }
+
+            QuickActionSession session = new(new CapturedSelection(result.Text!, result.SourceWindow));
+            lock (paletteSync)
+            {
+                activePaletteSession = session;
+            }
+
+            ActionPaletteRequested?.Invoke(this, session);
+        }
+        catch (OperationCanceledException)
+        {
+            logger.Information("Quick Action 선택 문자열 캡처가 취소되었습니다.");
+        }
+        catch (Exception ex)
+        {
+            logger.Error("Quick Action 준비 중 오류가 발생했습니다.", ex);
+            Notify("Quick Action을 시작하지 못했습니다.", ToolTipIcon.Error);
+        }
+        finally
+        {
+            operationGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Runs entirely on the UI thread with no await, so admission, the source-window recheck and the
+    /// session claim cannot be interleaved with the palette timeout.
+    /// </summary>
+    internal PaletteAdmission TryStartPaletteAction(QuickActionSession session, BuiltInActionKind kind)
+    {
+        bool isCurrent;
+        lock (paletteSync)
+        {
+            isCurrent = ReferenceEquals(activePaletteSession, session);
+        }
+
+        PaletteAdmission admission = DecidePaletteAdmission(
+            session,
+            isCurrent,
+            () => operationGate.Wait(0),
+            () => operationGate.Release(),
+            () => activeWindow.IsStillActive(session.Selection.SourceWindow));
+
+        if (admission == PaletteAdmission.TargetChanged)
+        {
+            lock (paletteSync)
+            {
+                activePaletteSession = null;
+            }
+
+            Notify("선택한 창이 바뀌어 실행하지 않았습니다. 다시 선택해 주세요.", ToolTipIcon.Warning);
+            return admission;
+        }
+
+        if (admission != PaletteAdmission.Started)
+        {
+            return admission;
+        }
+
+        long operationId = Interlocked.Increment(ref nextTranslationInteractionId);
+        CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token);
+        string text = session.Selection.Text;
+        lock (paletteSync)
+        {
+            paletteOperationId = operationId;
+            paletteCancellation = cancellation;
+            activePaletteSession = null;
+        }
+
+        session.TryComplete();
+        _ = RunPaletteActionAsync(kind, text, operationId, cancellation);
+        return PaletteAdmission.Started;
+    }
+
+    /// <summary>
+    /// The whole body is inside try/finally and the finally is the single place that releases the
+    /// operation gate, so no synchronous or asynchronous failure can strand it.
+    /// </summary>
+    private async Task RunPaletteActionAsync(
+        BuiltInActionKind kind,
+        string selectedText,
+        long operationId,
+        CancellationTokenSource cancellation)
+    {
+        try
+        {
+            string title = PromptComposer.DisplayName(kind);
+            if (Settings.General.ShowTranslatingPopup)
+            {
+                ShowPopup(
+                    true,
+                    TranslationPopupKind.Translating,
+                    "결과를 만들고 있습니다…",
+                    operationId: operationId,
+                    title: title);
+            }
+
+            TranslationResult result = await directTranslationProvider.GenerateAsync(
+                PromptComposer.Compose(kind, selectedText),
+                cancellation.Token);
+
+            if (!IsCurrentPaletteOperation(operationId) || cancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (!result.IsSuccess && result.FailureKind == TranslationFailureKind.Cancelled)
+            {
+                return;
+            }
+
+            (TranslationPopupKind popupKind, string message, string? copyText) =
+                ResolveActionPopup(result, Settings);
+            if (result.IsSuccess)
+            {
+                logger.Information($"Quick Action을 완료했습니다. Action={kind}, InputCharacters={selectedText.Length}, OutputCharacters={result.TranslatedText!.Length}, Kind={popupKind}");
+            }
+            else
+            {
+                logger.Warning($"Quick Action 실행에 실패했습니다. Action={kind}, Kind={result.FailureKind}, InputCharacters={selectedText.Length}");
+            }
+
+            ShowPopup(
+                true,
+                popupKind,
+                message,
+                copyText: copyText,
+                operationId: operationId,
+                title: title);
+        }
+        catch (OperationCanceledException)
+        {
+            logger.Information("Quick Action 실행이 취소되었습니다.");
+        }
+        catch (Exception ex)
+        {
+            logger.Error("Quick Action 실행 중 오류가 발생했습니다.", ex);
+            Notify("Quick Action 실행 중 오류가 발생했습니다.", ToolTipIcon.Error);
+        }
+        finally
+        {
+            lock (paletteSync)
+            {
+                if (paletteOperationId == operationId)
+                {
+                    paletteCancellation = null;
+                }
+
+                cancellation.Dispose();
+            }
+
+            operationGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// The admission order is the safety contract: a stale session never runs, a busy gate never
+    /// discards the captured text, and a changed target releases the gate it just took.
+    /// </summary>
+    internal static PaletteAdmission DecidePaletteAdmission(
+        QuickActionSession session,
+        bool isCurrentSession,
+        Func<bool> tryAcquireGate,
+        Action releaseGate,
+        Func<bool> isTargetStillActive)
+    {
+        if (!isCurrentSession || session.Completed)
+        {
+            return PaletteAdmission.Stale;
+        }
+
+        if (!tryAcquireGate())
+        {
+            return PaletteAdmission.Busy;
+        }
+
+        if (!isTargetStillActive())
+        {
+            releaseGate();
+            session.TryComplete();
+            return PaletteAdmission.TargetChanged;
+        }
+
+        return PaletteAdmission.Started;
+    }
+
+    /// <summary>
+    /// An unusually long result is shown with a warning and stays copyable. It is never turned into
+    /// a failure because a palette action never replaces the selection.
+    /// </summary>
+    internal static (TranslationPopupKind Kind, string Message, string? CopyText) ResolveActionPopup(
+        TranslationResult result,
+        AppSettings settings)
+    {
+        if (!result.IsSuccess)
+        {
+            return (TranslationPopupKind.Error, result.ErrorMessage ?? "결과를 만들지 못했습니다.", null);
+        }
+
+        string output = result.TranslatedText!;
+        return output.Length > settings.Translation.MaxInputCharacters
+            ? (TranslationPopupKind.Warning,
+                $"결과가 예상보다 깁니다. 내용을 확인한 후 복사해 주세요.\r\n\r\n{output}",
+                output)
+            : (TranslationPopupKind.Success, output, output);
+    }
+
+    internal void DismissActionPalette(QuickActionSession? session)
+    {
+        QuickActionSession? current;
+        lock (paletteSync)
+        {
+            current = activePaletteSession;
+            if (current is null || (session is not null && !ReferenceEquals(current, session)))
+            {
+                return;
+            }
+
+            activePaletteSession = null;
+        }
+
+        current.TryComplete();
+    }
+
+    private bool IsCurrentPaletteOperation(long operationId)
+    {
+        lock (paletteSync)
+        {
+            return paletteOperationId == operationId;
+        }
+    }
+
+    private bool TryCancelPaletteOperation(long operationId)
+    {
+        lock (paletteSync)
+        {
+            if (operationId == 0 || paletteOperationId != operationId)
+            {
+                return false;
+            }
+
+            paletteCancellation?.Cancel();
+            return true;
         }
     }
 
@@ -501,11 +850,50 @@ public sealed class ApplicationController : IDisposable
                 title: "보조 모델 번역 중");
         }
 
-        _ = ExecuteFallbackTranslationAsync(operation, useAsPrimary);
+        _ = RunFallbackTranslationObservedAsync(operation, useAsPrimary);
+    }
+
+    private async Task RunFallbackTranslationObservedAsync(TranslationInteraction operation, bool useAsPrimary)
+    {
+        try
+        {
+            await ExecuteFallbackTranslationAsync(operation, useAsPrimary);
+        }
+        catch (OperationCanceledException)
+        {
+            logger.Information("보조 모델 번역이 취소되었습니다.");
+        }
+        catch (Exception ex)
+        {
+            logger.Error("보조 모델 번역 중 예기치 않은 오류가 발생했습니다.", ex);
+            if (IsCurrentTranslationInteraction(operation) && !operation.Dismissed)
+            {
+                ShowPopup(
+                    operation.IsReadTranslation,
+                    TranslationPopupKind.Error,
+                    "보조 모델 번역 중 오류가 발생했습니다.",
+                    action: TranslationPopupAction.RetryFallback,
+                    operationId: operation.Id);
+            }
+        }
+        finally
+        {
+            lock (translationInteractionSync)
+            {
+                operation.FallbackInProgress = false;
+                operation.FallbackCancellation = null;
+            }
+        }
     }
 
     public void CancelTranslationInteraction(long operationId)
     {
+        // A palette generation owns no TranslationInteraction, so its popup must cancel it here.
+        if (TryCancelPaletteOperation(operationId))
+        {
+            return;
+        }
+
         TranslationInteraction? operation;
         lock (translationInteractionSync)
         {
@@ -781,27 +1169,34 @@ public sealed class ApplicationController : IDisposable
             return;
         }
 
-        using ClipboardSnapshot snapshot = clipboard.CaptureSnapshot();
-        if (!activeWindow.IsStillActive(sourceWindow))
-        {
-            ShowChangedTargetWarning(replacement);
-            return;
-        }
-
         try
         {
-            PasteTextResult pasteResult = await clipboard.PasteTextAsync(
-                replacement,
-                snapshot,
-                Settings.Translation.ClipboardRestoreDelayMs,
-                () => activeWindow.IsStillActive(sourceWindow),
-                cancellationToken);
-            if (pasteResult == PasteTextResult.TargetChanged)
+            PasteTextOutcome pasteResult = await clipboardMutations.RunAsync(async () =>
+            {
+                if (!activeWindow.IsStillActive(sourceWindow) || !IsCurrentTranslationInteraction(operation))
+                {
+                    return new PasteTextOutcome(PasteTextResult.TargetChanged);
+                }
+
+                using ClipboardSnapshot snapshot = clipboard.CaptureSnapshot();
+                if (!activeWindow.IsStillActive(sourceWindow) || !IsCurrentTranslationInteraction(operation))
+                {
+                    return new PasteTextOutcome(PasteTextResult.TargetChanged);
+                }
+
+                return await clipboard.PasteTextWithOutcomeAsync(
+                    replacement,
+                    snapshot,
+                    Settings.Translation.ClipboardRestoreDelayMs,
+                    () => activeWindow.IsStillActive(sourceWindow) && IsCurrentTranslationInteraction(operation),
+                    cancellationToken);
+            }, cancellationToken);
+            if (pasteResult.Status == PasteTextResult.TargetChanged)
             {
                 ShowChangedTargetWarning(replacement);
                 return;
             }
-            if (pasteResult == PasteTextResult.ClipboardChanged)
+            if (pasteResult.Status == PasteTextResult.ClipboardChanged)
             {
                 logger.Warning("클립보드가 변경되어 작성 번역 자동 치환을 취소했습니다.");
                 ShowPopup(
@@ -813,10 +1208,13 @@ public sealed class ApplicationController : IDisposable
             }
 
             logger.Information($"작성 번역을 완료했습니다. InputCharacters={originalText.Length}, OutputCharacters={replacement.Length}");
+            string successMessage = pasteResult.ClipboardRestored
+                ? "선택 영역을 번역문으로 교체했습니다."
+                : "선택 영역을 번역문으로 교체했지만 기존 클립보드를 복원하지 못했습니다.";
             ShowPopup(
                 false,
-                TranslationPopupKind.Success,
-                "선택 영역을 번역문으로 교체했습니다.",
+                pasteResult.ClipboardRestored ? TranslationPopupKind.Success : TranslationPopupKind.Warning,
+                successMessage,
                 action: offerFallbackAfterCompletion ? TranslationPopupAction.ShowFallback : TranslationPopupAction.None,
                 operationId: operation.Id);
         }
@@ -880,80 +1278,30 @@ public sealed class ApplicationController : IDisposable
         return selected;
     }
 
-    private void TryRollbackSettings(
-        AppSettings previous,
-        bool previousStartup,
-        string? previousApiKey,
-        bool apiKeyChanged)
+    private void RestoreApiKey(string? previousApiKey)
     {
-        try
+        if (string.IsNullOrEmpty(previousApiKey))
         {
-            hotkeys.Register(previous.Translation.ReadHotkey, previous.Translation.ReplaceHotkey);
-            startupRegistration.SetEnabled(previousStartup);
-            if (apiKeyChanged)
-            {
-                if (string.IsNullOrEmpty(previousApiKey))
-                {
-                    secretStore.DeleteSecret(SecretNames.GeminiApiKey);
-                }
-                else
-                {
-                    secretStore.WriteSecret(SecretNames.GeminiApiKey, previousApiKey);
-                }
-            }
+            secretStore.DeleteSecret(SecretNames.GeminiApiKey);
         }
-        catch (Exception rollbackError)
+        else
         {
-            logger.Error("설정 변경 실패 후 기존 상태를 복구하지 못했습니다.", rollbackError);
+            secretStore.WriteSecret(SecretNames.GeminiApiKey, previousApiKey);
         }
     }
 
-    private static AppSettings CloneSettings(AppSettings source)
+    internal static AppSettings CloneSettings(AppSettings source)
     {
-        AppSettings clone = new();
-        CopySettings(source, clone);
-        return clone;
+        string json = JsonSerializer.Serialize(source);
+        return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
     }
 
-    private static void CopySettings(AppSettings source, AppSettings target)
+    internal static void CopySettings(AppSettings source, AppSettings target)
     {
-        target.General.TranslationEnabled = source.General.TranslationEnabled;
-        target.General.RunAtWindowsStartup = source.General.RunAtWindowsStartup;
-        target.General.ShowTranslatingPopup = source.General.ShowTranslatingPopup;
-        target.General.PopupTimeoutMs = source.General.PopupTimeoutMs;
-        target.General.ReadPopupTimeoutMs = source.General.ReadPopupTimeoutMs;
-        target.General.ReplacePopupTimeoutMs = source.General.ReplacePopupTimeoutMs;
-        target.General.EnableLogging = source.General.EnableLogging;
-        target.General.LogRetentionDays = source.General.LogRetentionDays;
-        target.General.EnableTranslationHistory = source.General.EnableTranslationHistory;
-        target.General.HistoryRetentionDays = source.General.HistoryRetentionDays;
-
-        target.Translation.ReadTargetLanguage = source.Translation.ReadTargetLanguage;
-        target.Translation.ReplaceTargetLanguage = source.Translation.ReplaceTargetLanguage;
-        target.Translation.ReplaceFormat = source.Translation.ReplaceFormat;
-        target.Translation.ReadHotkey = source.Translation.ReadHotkey;
-        target.Translation.ReplaceHotkey = source.Translation.ReplaceHotkey;
-        target.Translation.MaxInputCharacters = source.Translation.MaxInputCharacters;
-        target.Translation.ClipboardCopyTimeoutMs = source.Translation.ClipboardCopyTimeoutMs;
-        target.Translation.ClipboardRestoreDelayMs = source.Translation.ClipboardRestoreDelayMs;
-        target.Translation.ClipboardRetryCount = source.Translation.ClipboardRetryCount;
-        target.Translation.ClipboardRetryDelayMs = source.Translation.ClipboardRetryDelayMs;
-        target.Translation.PreferUiAutomation = source.Translation.PreferUiAutomation;
-        target.Translation.ReadRecentTargetLanguage = source.Translation.ReadRecentTargetLanguage;
-        target.Translation.ReplaceRecentTargetLanguage = source.Translation.ReplaceRecentTargetLanguage;
-        target.Translation.TranslationStyle = source.Translation.TranslationStyle;
-        target.Translation.Politeness = source.Translation.Politeness;
-        target.Translation.CustomInstructions = source.Translation.CustomInstructions;
-        target.Translation.Glossary = source.Translation.Glossary;
-        target.Translation.ExcludedTerms = source.Translation.ExcludedTerms;
-
-        target.Api.Provider = source.Api.Provider;
-        target.Api.Model = source.Api.Model;
-        target.Api.RequestTimeoutSeconds = source.Api.RequestTimeoutSeconds;
-        target.Api.TransientRetryCount = source.Api.TransientRetryCount;
-        target.Api.EnableFallbackModel = source.Api.EnableFallbackModel;
-        target.Api.FallbackModel = source.Api.FallbackModel;
-        target.Api.OfferFallbackAfterCompletion = source.Api.OfferFallbackAfterCompletion;
+        AppSettings clone = CloneSettings(source);
+        target.General = clone.General;
+        target.Translation = clone.Translation;
+        target.Api = clone.Api;
     }
 
     private void Notify(string message, ToolTipIcon icon) =>
@@ -971,11 +1319,14 @@ public sealed class ApplicationController : IDisposable
             targetLanguage,
             originalText,
             translatedText));
-        if (Settings.General.EnableLogging)
+        if (ShouldRaiseTranslationHistoryChanged(Settings))
         {
             TranslationHistoryChanged?.Invoke(this, EventArgs.Empty);
         }
     }
+
+    internal static bool ShouldRaiseTranslationHistoryChanged(AppSettings settings) =>
+        settings.General.EnableTranslationHistory;
 
     private void ShowPopup(
         bool isReadTranslation,
@@ -1005,11 +1356,13 @@ public sealed class ApplicationController : IDisposable
     public void Dispose()
     {
         shutdown.Cancel();
+        DismissActionPalette(null);
         InvalidateActiveTranslationInteraction();
         hotkeys.Dispose();
         httpClient.Dispose();
         shutdown.Dispose();
         operationGate.Dispose();
+        clipboardMutations.Dispose();
     }
 }
 

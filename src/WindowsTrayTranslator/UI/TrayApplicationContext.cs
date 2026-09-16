@@ -15,6 +15,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private TranslationHistoryForm? historyForm;
     private TranslationResultPopupForm? translationPopup;
     private LanguageSelectionPopupForm? languageSelectionPopup;
+    private QuickActionPaletteForm? actionPalette;
 
     public TrayApplicationContext(ApplicationController controller, ILogger logger)
     {
@@ -62,6 +63,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         controller.SettingsApplied += OnSettingsApplied;
         controller.LanguageSelectionRequested += OnLanguageSelectionRequested;
         controller.TranslationHistoryChanged += OnTranslationHistoryChanged;
+        controller.ActionPaletteRequested += OnActionPaletteRequested;
 
         if (!string.IsNullOrWhiteSpace(controller.StartupWarning))
         {
@@ -163,6 +165,23 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void OnTranslationHistoryChanged(object? sender, EventArgs e) =>
         historyForm?.RefreshEntries();
 
+    private void OnActionPaletteRequested(object? sender, QuickActionSession session)
+    {
+        actionPalette?.Close();
+        QuickActionPaletteForm palette = new(session, controller.TryStartPaletteAction);
+        actionPalette = palette;
+        palette.Dismissed += (_, _) =>
+        {
+            if (ReferenceEquals(actionPalette, palette))
+            {
+                actionPalette = null;
+            }
+
+            controller.DismissActionPalette(session);
+        };
+        palette.Show();
+    }
+
     private void ShowBalloon(string message, ToolTipIcon icon)
     {
         notifyIcon.BalloonTipTitle = "Windows Tray Translator";
@@ -177,6 +196,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         historyForm?.Close();
         translationPopup?.Close();
         languageSelectionPopup?.Close();
+        actionPalette?.Close();
         notifyIcon.Visible = false;
         ExitThread();
     }
@@ -190,9 +210,11 @@ public sealed class TrayApplicationContext : ApplicationContext
             controller.SettingsApplied -= OnSettingsApplied;
             controller.LanguageSelectionRequested -= OnLanguageSelectionRequested;
             controller.TranslationHistoryChanged -= OnTranslationHistoryChanged;
+            controller.ActionPaletteRequested -= OnActionPaletteRequested;
             translationPopup?.Dispose();
             historyForm?.Dispose();
             languageSelectionPopup?.Dispose();
+            actionPalette?.Dispose();
             notifyIcon.Dispose();
         }
 

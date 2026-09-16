@@ -29,6 +29,7 @@ public sealed class TranslationSettings
     public string ReplaceFormat { get; set; } = "TranslationWithOriginal";
     public string ReadHotkey { get; set; } = "Alt+R";
     public string ReplaceHotkey { get; set; } = "Alt+T";
+    public string ActionPaletteHotkey { get; set; } = "Ctrl+Alt+A";
     public int MaxInputCharacters { get; set; } = 5000;
     public int ClipboardCopyTimeoutMs { get; set; } = 2500;
     public int ClipboardRestoreDelayMs { get; set; } = 300;

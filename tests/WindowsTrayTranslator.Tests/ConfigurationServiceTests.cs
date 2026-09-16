@@ -16,6 +16,7 @@ public sealed class ConfigurationServiceTests : IDisposable
 
         Assert.Equal("Alt+R", settings.Translation.ReadHotkey);
         Assert.Equal("Alt+T", settings.Translation.ReplaceHotkey);
+        Assert.Equal("Ctrl+Alt+A", settings.Translation.ActionPaletteHotkey);
         Assert.Equal("gemini-3.5-flash-lite", settings.Api.Model);
         Assert.Equal(5000, settings.General.ReadPopupTimeoutMs);
         Assert.Equal(5000, settings.General.ReplacePopupTimeoutMs);
@@ -126,6 +127,57 @@ public sealed class ConfigurationServiceTests : IDisposable
 
         Assert.Equal("Auto", settings.Translation.ReadTargetLanguage);
         Assert.Equal("Select", settings.Translation.ReplaceTargetLanguage);
+    }
+
+    [Fact]
+    public void Load_EmptyOptionalPaletteHotkey_PreservesDisabledState()
+    {
+        Directory.CreateDirectory(directory);
+        string file = Path.Combine(directory, "appsettings.json");
+        File.WriteAllText(file, """
+            { "Translation": { "ActionPaletteHotkey": "" } }
+            """);
+
+        ConfigurationService service = new(file, new TestLogger());
+        AppSettings settings = service.Load();
+        service.Save(settings);
+        AppSettings reloaded = service.Load();
+
+        Assert.Equal(string.Empty, reloaded.Translation.ActionPaletteHotkey);
+    }
+
+    [Fact]
+    public void Load_PaletteConflictsWithCore_DisablesOnlyPalette()
+    {
+        Directory.CreateDirectory(directory);
+        string file = Path.Combine(directory, "appsettings.json");
+        File.WriteAllText(file, """
+            { "Translation": { "ReadHotkey": "Ctrl+U", "ReplaceHotkey": "Ctrl+I", "ActionPaletteHotkey": "Ctrl+U" } }
+            """);
+
+        AppSettings settings = new ConfigurationService(file, new TestLogger()).Load();
+
+        Assert.Equal("Ctrl+U", settings.Translation.ReadHotkey);
+        Assert.Equal("Ctrl+I", settings.Translation.ReplaceHotkey);
+        Assert.Equal(string.Empty, settings.Translation.ActionPaletteHotkey);
+    }
+
+    [Fact]
+    public void Load_DamagedJson_NormalizesDefaultsAndPreservesBackup()
+    {
+        Directory.CreateDirectory(directory);
+        string file = Path.Combine(directory, "appsettings.json");
+        const string damaged = "{ invalid json";
+        File.WriteAllText(file, damaged);
+        ConfigurationService service = new(file, new TestLogger());
+
+        AppSettings settings = service.Load();
+
+        Assert.Equal(5000, settings.General.ReadPopupTimeoutMs);
+        Assert.Equal("Alt+R", settings.Translation.ReadHotkey);
+        Assert.Equal(damaged, File.ReadAllText(file + ".bak"));
+        Assert.NotNull(service.LastLoadWarning);
+        Assert.Equal("Alt+R", new ConfigurationService(file, new TestLogger()).Load().Translation.ReadHotkey);
     }
 
     public void Dispose()

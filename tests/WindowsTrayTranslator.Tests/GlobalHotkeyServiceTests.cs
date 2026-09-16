@@ -20,6 +20,49 @@ public sealed class GlobalHotkeyServiceTests
         Assert.Equal((uint)'T', registrar.Registered[GlobalHotkeyService.ReplaceHotkeyId]);
     }
 
+    [Fact]
+    public void RegisterStartup_WhenReplaceFails_KeepsReadRegistered()
+    {
+        FakeRegistrar registrar = new() { FailNextVirtualKey = (uint)'T' };
+        using GlobalHotkeyService service = new(_ => { }, new TestLogger(), registrar);
+
+        IReadOnlyList<string> failures = service.RegisterStartup("Alt+R", "Alt+T", "Ctrl+Alt+A");
+
+        Assert.Single(failures);
+        Assert.Equal((uint)'R', registrar.Registered[GlobalHotkeyService.ReadHotkeyId]);
+        Assert.False(registrar.Registered.ContainsKey(GlobalHotkeyService.ReplaceHotkeyId));
+        Assert.Equal((uint)'A', registrar.Registered[GlobalHotkeyService.ActionPaletteHotkeyId]);
+    }
+
+    [Fact]
+    public void RegisterStartup_WhenPaletteFails_KeepsCoreRegistered()
+    {
+        FakeRegistrar registrar = new() { FailNextVirtualKey = (uint)'A' };
+        using GlobalHotkeyService service = new(_ => { }, new TestLogger(), registrar);
+
+        IReadOnlyList<string> failures = service.RegisterStartup("Alt+R", "Alt+T", "Ctrl+Alt+A");
+
+        Assert.Single(failures);
+        Assert.Equal((uint)'R', registrar.Registered[GlobalHotkeyService.ReadHotkeyId]);
+        Assert.Equal((uint)'T', registrar.Registered[GlobalHotkeyService.ReplaceHotkeyId]);
+        Assert.False(registrar.Registered.ContainsKey(GlobalHotkeyService.ActionPaletteHotkeyId));
+    }
+
+    [Fact]
+    public void Register_WhenPaletteRegistrationFails_RestoresPreviousRegistrationSet()
+    {
+        FakeRegistrar registrar = new();
+        using GlobalHotkeyService service = new(_ => { }, new TestLogger(), registrar);
+        service.Register("Alt+R", "Alt+T", "Ctrl+Alt+A");
+        registrar.FailNextVirtualKey = (uint)'P';
+
+        Assert.ThrowsAny<Exception>(() => service.Register("Ctrl+U", "Ctrl+I", "Ctrl+Alt+P"));
+
+        Assert.Equal((uint)'R', registrar.Registered[GlobalHotkeyService.ReadHotkeyId]);
+        Assert.Equal((uint)'T', registrar.Registered[GlobalHotkeyService.ReplaceHotkeyId]);
+        Assert.Equal((uint)'A', registrar.Registered[GlobalHotkeyService.ActionPaletteHotkeyId]);
+    }
+
     private sealed class FakeRegistrar : IHotkeyRegistrar
     {
         public Dictionary<int, uint> Registered { get; } = [];

@@ -25,6 +25,7 @@ public sealed class SettingsForm : Form
     private readonly Label replaceFormatPreviewLabel = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
     private readonly HotkeyTextBox readHotkeyTextBox = new() { Dock = DockStyle.Fill };
     private readonly HotkeyTextBox replaceHotkeyTextBox = new() { Dock = DockStyle.Fill };
+    private readonly HotkeyTextBox actionPaletteHotkeyTextBox = new() { Dock = DockStyle.Fill };
     private readonly NumericUpDown maxInputNumeric = CreateNumeric(1, 100000);
     private readonly NumericUpDown copyTimeoutNumeric = CreateNumeric(100, 10000, 100);
     private readonly NumericUpDown restoreDelayNumeric = CreateNumeric(50, 5000, 50);
@@ -252,6 +253,7 @@ public sealed class SettingsForm : Form
         AddSectionRow(table, "단축키");
         AddRow(table, "읽기 단축키", readHotkeyTextBox);
         AddRow(table, "작성 단축키", replaceHotkeyTextBox);
+        AddRow(table, "Quick Action 단축키 (비우면 사용 안 함)", actionPaletteHotkeyTextBox);
 
         Button resetHotkeysButton = new() { Text = "단축키 기본값 복원", AutoSize = true };
         AppTheme.StyleSecondaryButton(resetHotkeysButton);
@@ -259,6 +261,7 @@ public sealed class SettingsForm : Form
         {
             readHotkeyTextBox.Text = "Alt+R";
             replaceHotkeyTextBox.Text = "Alt+T";
+            actionPaletteHotkeyTextBox.Text = "Ctrl+Alt+A";
         };
         AddFullRow(table, resetHotkeysButton);
         AddSectionRow(table, "선택 영역 가져오기");
@@ -346,6 +349,7 @@ public sealed class SettingsForm : Form
         UpdateReplaceFormatPreview();
         readHotkeyTextBox.Text = settings.Translation.ReadHotkey;
         replaceHotkeyTextBox.Text = settings.Translation.ReplaceHotkey;
+        actionPaletteHotkeyTextBox.Text = settings.Translation.ActionPaletteHotkey;
         maxInputNumeric.Value = settings.Translation.MaxInputCharacters;
         copyTimeoutNumeric.Value = settings.Translation.ClipboardCopyTimeoutMs;
         restoreDelayNumeric.Value = settings.Translation.ClipboardRestoreDelayMs;
@@ -408,12 +412,15 @@ public sealed class SettingsForm : Form
                 : ReplaceOutputFormat.TranslationWithOriginal.ToString(),
             ReadHotkey = readHotkeyTextBox.Text,
             ReplaceHotkey = replaceHotkeyTextBox.Text,
+            ActionPaletteHotkey = actionPaletteHotkeyTextBox.Text,
             MaxInputCharacters = (int)maxInputNumeric.Value,
             ClipboardCopyTimeoutMs = (int)copyTimeoutNumeric.Value,
             ClipboardRestoreDelayMs = (int)restoreDelayNumeric.Value,
             ClipboardRetryCount = (int)retryCountNumeric.Value,
             ClipboardRetryDelayMs = (int)retryDelayNumeric.Value,
             PreferUiAutomation = !clipboardFirstCheckBox.Checked,
+            ReadRecentTargetLanguage = controller.Settings.Translation.ReadRecentTargetLanguage,
+            ReplaceRecentTargetLanguage = controller.Settings.Translation.ReplaceRecentTargetLanguage,
             TranslationStyle = styleCombo.SelectedItem?.ToString() ?? "Natural",
             Politeness = politenessCombo.SelectedItem?.ToString() ?? "Auto",
             CustomInstructions = customInstructionsTextBox.Text,

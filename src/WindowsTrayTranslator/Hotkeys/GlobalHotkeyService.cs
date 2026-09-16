@@ -8,12 +8,14 @@ public sealed class GlobalHotkeyService : IDisposable
 {
     public const int ReadHotkeyId = 1;
     public const int ReplaceHotkeyId = 2;
+    public const int ActionPaletteHotkeyId = 3;
 
     private readonly HotkeyWindow window;
     private readonly ILogger logger;
     private readonly IHotkeyRegistrar registrar;
     private HotkeyDefinition? currentRead;
     private HotkeyDefinition? currentReplace;
+    private HotkeyDefinition? currentPalette;
 
     public GlobalHotkeyService(Action<int> callback, ILogger logger)
         : this(callback, logger, new NativeHotkeyRegistrar())
@@ -27,10 +29,26 @@ public sealed class GlobalHotkeyService : IDisposable
         this.registrar = registrar;
     }
 
-    public void Register(string readHotkey, string replaceHotkey)
+    public IReadOnlyList<string> RegisterStartup(string readHotkey, string replaceHotkey, string? paletteHotkey)
+    {
+        UnregisterCurrent();
+        List<string> failures = [];
+        TryRegisterStartupOne(ReadHotkeyId, "읽기 단축키", readHotkey, value => currentRead = value, failures);
+        TryRegisterStartupOne(ReplaceHotkeyId, "작성 단축키", replaceHotkey, value => currentReplace = value, failures);
+        if (!string.IsNullOrWhiteSpace(paletteHotkey))
+        {
+            TryRegisterStartupOne(ActionPaletteHotkeyId, "Quick Action 단축키", paletteHotkey, value => currentPalette = value, failures);
+        }
+        return failures;
+    }
+
+    public void Register(string readHotkey, string replaceHotkey, string? paletteHotkey = null)
     {
         HotkeyDefinition read = HotkeyDefinition.Parse(readHotkey);
         HotkeyDefinition replace = HotkeyDefinition.Parse(replaceHotkey);
+        HotkeyDefinition? palette = string.IsNullOrWhiteSpace(paletteHotkey)
+            ? null
+            : HotkeyDefinition.Parse(paletteHotkey);
         if (read == replace)
         {
             throw new InvalidOperationException("읽기 번역과 작성 번역에 같은 단축키를 사용할 수 없습니다.");
@@ -38,6 +56,7 @@ public sealed class GlobalHotkeyService : IDisposable
 
         HotkeyDefinition? previousRead = currentRead;
         HotkeyDefinition? previousReplace = currentReplace;
+        HotkeyDefinition? previousPalette = currentPalette;
         UnregisterCurrent();
 
         try
@@ -46,13 +65,38 @@ public sealed class GlobalHotkeyService : IDisposable
             currentRead = read;
             RegisterOne(ReplaceHotkeyId, replace);
             currentReplace = replace;
-            logger.Information($"전역 단축키를 등록했습니다. Read={readHotkey}, Replace={replaceHotkey}");
+            if (palette is not null)
+            {
+                RegisterOne(ActionPaletteHotkeyId, palette);
+                currentPalette = palette;
+            }
+            logger.Information($"전역 단축키를 등록했습니다. Read={readHotkey}, Replace={replaceHotkey}, PaletteEnabled={palette is not null}");
         }
         catch
         {
             UnregisterCurrent();
-            TryRestore(previousRead, previousReplace);
+            TryRestore(previousRead, previousReplace, previousPalette);
             throw;
+        }
+    }
+
+    private void TryRegisterStartupOne(
+        int id,
+        string displayName,
+        string hotkey,
+        Action<HotkeyDefinition> setCurrent,
+        List<string> failures)
+    {
+        try
+        {
+            HotkeyDefinition definition = HotkeyDefinition.Parse(hotkey);
+            RegisterOne(id, definition);
+            setCurrent(definition);
+        }
+        catch (Exception ex)
+        {
+            failures.Add($"{displayName} ({hotkey}): {ex.Message}");
+            logger.Error($"{displayName}를 등록하지 못했습니다.", ex);
         }
     }
 
@@ -65,7 +109,7 @@ public sealed class GlobalHotkeyService : IDisposable
         }
     }
 
-    private void TryRestore(HotkeyDefinition? read, HotkeyDefinition? replace)
+    private void TryRestore(HotkeyDefinition? read, HotkeyDefinition? replace, HotkeyDefinition? palette)
     {
         try
         {
@@ -79,6 +123,12 @@ public sealed class GlobalHotkeyService : IDisposable
             {
                 RegisterOne(ReplaceHotkeyId, replace);
                 currentReplace = replace;
+            }
+
+            if (palette is not null)
+            {
+                RegisterOne(ActionPaletteHotkeyId, palette);
+                currentPalette = palette;
             }
         }
         catch (Exception ex)
@@ -100,10 +150,23 @@ public sealed class GlobalHotkeyService : IDisposable
             registrar.Unregister(window.Handle, ReplaceHotkeyId);
             currentReplace = null;
         }
+
+
+        UnregisterPalette();
+    }
+
+    public void UnregisterPalette()
+    {
+        if (currentPalette is not null)
+        {
+            registrar.Unregister(window.Handle, ActionPaletteHotkeyId);
+            currentPalette = null;
+        }
     }
 
     internal HotkeyDefinition? CurrentRead => currentRead;
     internal HotkeyDefinition? CurrentReplace => currentReplace;
+    internal HotkeyDefinition? CurrentPalette => currentPalette;
 
     public void Dispose()
     {

@@ -3,7 +3,14 @@ using System.Runtime.InteropServices;
 
 namespace WindowsTrayTranslator.Windows;
 
-public sealed class KeyboardInputService
+public interface IKeyboardInputService
+{
+    Task<bool> WaitForModifiersReleasedAsync(int timeoutMs, CancellationToken cancellationToken);
+    void SendCopy();
+    void SendPaste();
+}
+
+public sealed class KeyboardInputService : IKeyboardInputService
 {
     private const ushort VkControl = 0x11;
     private const ushort VkC = 0x43;

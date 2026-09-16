@@ -18,32 +18,32 @@ public static class GeminiResponseParser
         }
         catch (JsonException)
         {
-            return TranslationResult.Failure(TranslationFailureKind.InvalidResponse, "번역 서버 응답을 해석하지 못했습니다.");
+            return TranslationResult.Failure(TranslationFailureKind.InvalidResponse, "서버 응답을 해석하지 못했습니다.");
         }
 
         if (!string.IsNullOrWhiteSpace(response?.PromptFeedback?.BlockReason))
         {
-            return TranslationResult.Failure(TranslationFailureKind.SafetyBlocked, "안전 정책으로 인해 번역 결과를 받을 수 없습니다.");
+            return TranslationResult.Failure(TranslationFailureKind.SafetyBlocked, "안전 정책으로 인해 결과를 받을 수 없습니다.");
         }
 
         GeminiCandidate? candidate = response?.Candidates?.FirstOrDefault();
         if (candidate is null)
         {
-            return TranslationResult.Failure(TranslationFailureKind.InvalidResponse, "번역 서버 응답에 결과가 없습니다.");
+            return TranslationResult.Failure(TranslationFailureKind.InvalidResponse, "서버 응답에 결과가 없습니다.");
         }
 
         if (string.Equals(candidate.FinishReason, "SAFETY", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(candidate.FinishReason, "BLOCKLIST", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(candidate.FinishReason, "PROHIBITED_CONTENT", StringComparison.OrdinalIgnoreCase))
         {
-            return TranslationResult.Failure(TranslationFailureKind.SafetyBlocked, "안전 정책으로 인해 번역 결과를 받을 수 없습니다.");
+            return TranslationResult.Failure(TranslationFailureKind.SafetyBlocked, "안전 정책으로 인해 결과를 받을 수 없습니다.");
         }
 
         string translated = string.Concat(candidate.Content?.Parts.Select(part => part.Text) ?? []).Trim();
         translated = RemoveCodeFence(translated);
         if (string.IsNullOrWhiteSpace(translated))
         {
-            return TranslationResult.Failure(TranslationFailureKind.EmptyResponse, "번역 결과가 비어 있습니다.");
+            return TranslationResult.Failure(TranslationFailureKind.EmptyResponse, "결과가 비어 있습니다.");
         }
 
         return TranslationResult.Success(translated);

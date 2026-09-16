@@ -43,10 +43,20 @@ public static class SettingsValidator
         settings.Translation.ReplaceHotkey = NonEmpty(settings.Translation.ReplaceHotkey, "Alt+T");
         settings.Translation.ReadHotkey = ValidHotkeyOrDefault(settings.Translation.ReadHotkey, "Alt+R");
         settings.Translation.ReplaceHotkey = ValidHotkeyOrDefault(settings.Translation.ReplaceHotkey, "Alt+T");
+        settings.Translation.ActionPaletteHotkey = ValidOptionalHotkeyOrEmpty(settings.Translation.ActionPaletteHotkey);
         if (HotkeyDefinition.Parse(settings.Translation.ReadHotkey) == HotkeyDefinition.Parse(settings.Translation.ReplaceHotkey))
         {
             settings.Translation.ReadHotkey = "Alt+R";
             settings.Translation.ReplaceHotkey = "Alt+T";
+        }
+        if (!string.IsNullOrEmpty(settings.Translation.ActionPaletteHotkey))
+        {
+            HotkeyDefinition palette = HotkeyDefinition.Parse(settings.Translation.ActionPaletteHotkey);
+            if (palette == HotkeyDefinition.Parse(settings.Translation.ReadHotkey) ||
+                palette == HotkeyDefinition.Parse(settings.Translation.ReplaceHotkey))
+            {
+                settings.Translation.ActionPaletteHotkey = string.Empty;
+            }
         }
         settings.Api.Provider = "Gemini";
         settings.Api.Model = NonEmpty(settings.Api.Model, "gemini-3.5-flash-lite");
@@ -67,6 +77,25 @@ public static class SettingsValidator
         catch (FormatException)
         {
             return fallback;
+        }
+    }
+
+    private static string ValidOptionalHotkeyOrEmpty(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        string normalized = value.Trim();
+        try
+        {
+            HotkeyDefinition.Parse(normalized);
+            return normalized;
+        }
+        catch (FormatException)
+        {
+            return string.Empty;
         }
     }
 
