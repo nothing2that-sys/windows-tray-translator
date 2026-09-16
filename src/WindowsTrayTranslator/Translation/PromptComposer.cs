@@ -40,10 +40,14 @@ internal static class PromptComposer
         BuiltInActionKind.RewriteNatural => new PromptPlan(
             BuildSystemPrompt(
                 "You refine text for a Windows desktop utility.",
+                // The language rule leads and is stated absolutely. An earlier version opened with
+                // "reads naturally to a native speaker", which a small model read as "a native
+                // English speaker" and answered with an English translation (1 in 20 measured).
                 """
-                Rewrite the user's text so it reads naturally to a native speaker.
-                Keep the original language, meaning, tone, and level of politeness.
-                Do not translate, summarize, shorten, expand, or add new information.
+                Write the result in exactly the same language as the input. Never translate it into another language.
+                Rewrite the user's text so it reads more naturally and fluently in that same language.
+                Keep the meaning, tone, and level of politeness of the original.
+                Do not summarize, shorten, expand, or add new information.
                 Preserve the original line structure where it carries meaning.
                 """),
             BuildUserPrompt("Rewrite the text in the DATA block.", selectedText)),

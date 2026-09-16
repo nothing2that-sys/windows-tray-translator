@@ -206,6 +206,37 @@ public sealed class GenerationSeamTests
         Assert.Equal(TranslationFailureKind.MissingApiKey, result.FailureKind);
     }
 
+    /// <summary>
+    /// Regression guard for a measured defect: with the earlier wording "reads naturally to a native
+    /// speaker" the model answered a Korean rewrite request with an English translation in 1 of 20
+    /// live runs. The language rule must lead and must be unambiguous.
+    /// </summary>
+    [Fact]
+    public void Compose_RewritePrompt_StatesLanguagePreservationFirstAndUnambiguously()
+    {
+        string system = PromptComposer.Compose(BuiltInActionKind.RewriteNatural, "원문").SystemPrompt;
+
+        Assert.DoesNotContain("native speaker", system, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("same language as the input", system, StringComparison.Ordinal);
+        Assert.Contains("Never translate", system, StringComparison.Ordinal);
+
+        string[] rules = system
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .SkipWhile(line => !line.StartsWith("Write the result", StringComparison.Ordinal))
+            .ToArray();
+        Assert.NotEmpty(rules);
+        Assert.StartsWith("Write the result in exactly the same language as the input.", rules[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Compose_SummarizePrompt_KeepsSourceLanguageRule()
+    {
+        string system = PromptComposer.Compose(BuiltInActionKind.Summarize, "원문").SystemPrompt;
+
+        Assert.DoesNotContain("native speaker", system, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("same language as the source text", system, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Compose_PassesSelectedTextAsDataBlockNotInstruction()
     {
@@ -224,7 +255,7 @@ public sealed class GenerationSeamTests
         PromptPlan summary = PromptComposer.Compose(BuiltInActionKind.Summarize, "원문");
 
         Assert.NotEqual(rewrite.SystemPrompt, summary.SystemPrompt);
-        Assert.Contains("Do not translate", rewrite.SystemPrompt, StringComparison.Ordinal);
+        Assert.Contains("Never translate", rewrite.SystemPrompt, StringComparison.Ordinal);
         Assert.Contains("same language as the source", summary.SystemPrompt, StringComparison.Ordinal);
         foreach (PromptPlan plan in new[] { rewrite, summary })
         {

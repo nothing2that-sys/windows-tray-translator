@@ -146,6 +146,52 @@ public sealed class ConfigurationServiceTests : IDisposable
         Assert.Equal(string.Empty, reloaded.Translation.ActionPaletteHotkey);
     }
 
+    /// <summary>
+    /// K5: an upgrade reads a settings file written before the palette existed. The new key must
+    /// appear with its default and every existing customisation must survive untouched.
+    /// </summary>
+    [Fact]
+    public void Load_LegacyFileWithoutPaletteHotkey_AddsDefaultAndPreservesExistingValues()
+    {
+        Directory.CreateDirectory(directory);
+        string file = Path.Combine(directory, "appsettings.json");
+        File.WriteAllText(file, """
+            {
+              "General": { "ReadPopupTimeoutMs": 4200, "EnableTranslationHistory": true, "LogRetentionDays": 21 },
+              "Translation": {
+                "ReadHotkey": "Ctrl+Shift+R",
+                "ReplaceHotkey": "Ctrl+Shift+T",
+                "ReadTargetLanguage": "Japanese",
+                "ReplaceFormat": "TranslationOnly",
+                "Glossary": "EIS=검사 시스템",
+                "PreferUiAutomation": true
+              },
+              "Api": { "Model": "gemini-3.5-flash-lite", "RequestTimeoutSeconds": 45 }
+            }
+            """);
+
+        ConfigurationService service = new(file, new TestLogger());
+        AppSettings settings = service.Load();
+
+        Assert.Equal("Ctrl+Alt+A", settings.Translation.ActionPaletteHotkey);
+        Assert.Equal("Ctrl+Shift+R", settings.Translation.ReadHotkey);
+        Assert.Equal("Ctrl+Shift+T", settings.Translation.ReplaceHotkey);
+        Assert.Equal("Japanese", settings.Translation.ReadTargetLanguage);
+        Assert.Equal("TranslationOnly", settings.Translation.ReplaceFormat);
+        Assert.Equal("EIS=검사 시스템", settings.Translation.Glossary);
+        Assert.True(settings.Translation.PreferUiAutomation);
+        Assert.Equal(4200, settings.General.ReadPopupTimeoutMs);
+        Assert.True(settings.General.EnableTranslationHistory);
+        Assert.Equal(21, settings.General.LogRetentionDays);
+        Assert.Equal(45, settings.Api.RequestTimeoutSeconds);
+
+        service.Save(settings);
+        AppSettings reloaded = service.Load();
+        Assert.Equal("Ctrl+Alt+A", reloaded.Translation.ActionPaletteHotkey);
+        Assert.Equal("Ctrl+Shift+R", reloaded.Translation.ReadHotkey);
+        Assert.Equal("EIS=검사 시스템", reloaded.Translation.Glossary);
+    }
+
     [Fact]
     public void Load_PaletteConflictsWithCore_DisablesOnlyPalette()
     {
