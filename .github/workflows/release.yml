@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+      - name: Validate tag and source version
+        shell: pwsh
+        run: |
+          $version = & ./scripts/Get-ReleaseVersion.ps1
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match source version v$version."
+          }
+      - name: Restore
+        run: dotnet restore WindowsTrayTranslator.sln -r win-x64
+      - name: Build
+        run: dotnet build WindowsTrayTranslator.sln -c Release --no-restore
+      - name: Test
+        run: dotnet test WindowsTrayTranslator.sln -c Release --no-build --logger "trx;LogFileName=test-results.trx"
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Package release assets
+        shell: pwsh
+        run: ./scripts/package-release.ps1 -NoRestore
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          body: |
+            This is an unsigned Windows build. Windows SmartScreen may show a warning.
+
+            Verify downloads with PowerShell:
+            `Get-FileHash -Algorithm SHA256 <downloaded-file>`
+          files: |
+            artifacts/release/*/WindowsTrayTranslator-Setup-*-x64.exe
+            artifacts/release/*/WindowsTrayTranslator-Portable-*-x64.zip
+            artifacts/release/*/SHA256SUMS.txt
