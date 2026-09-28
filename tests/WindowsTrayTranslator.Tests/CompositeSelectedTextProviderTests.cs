@@ -35,6 +35,19 @@ public sealed class CompositeSelectedTextProviderTests
     }
 
     [Fact]
+    public async Task GetSelectedTextAsync_FallbackSuccess_PreservesClipboardWarning()
+    {
+        FakeProvider primary = new(SelectedTextResult.Failure("failed", Window) with { ClipboardRestored = false });
+        FakeProvider fallback = new(SelectedTextResult.Success("fallback", Window));
+        CompositeSelectedTextProvider provider = new(primary, fallback, new TestLogger());
+
+        SelectedTextResult result = await provider.GetSelectedTextAsync(Window, 100, 1000, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.ClipboardRestored);
+    }
+
+    [Fact]
     public async Task GetSelectedTextAsync_NonRecoverableFailure_DoesNotCallFallback()
     {
         FakeProvider primary = new(SelectedTextResult.Failure("window changed", Window, canFallback: false));

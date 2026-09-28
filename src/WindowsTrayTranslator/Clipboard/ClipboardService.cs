@@ -49,7 +49,10 @@ public class ClipboardService : IClipboardService
             try
             {
                 object? value = source.GetData(format, autoConvert: false);
-                object? clone = CloneSupportedValue(value);
+                object? clone = CloneClipboardValue(
+                    format,
+                    value,
+                    () => Retry(() => System.Windows.Forms.Clipboard.GetImage()));
                 if (clone is not null)
                 {
                     formats[format] = clone;
@@ -74,7 +77,7 @@ public class ClipboardService : IClipboardService
                 value.Dispose();
             }
 
-            throw new InvalidOperationException("안전하게 백업할 수 없는 클립보드 형식이 있어 작업을 취소했습니다.");
+            throw new ClipboardSnapshotUnavailableException("안전하게 백업할 수 없는 클립보드 형식이 있습니다.");
         }
 
         return new ClipboardSnapshot(formats);
@@ -239,6 +242,21 @@ public class ClipboardService : IClipboardService
         _ => null
     };
 
+    internal static object? CloneClipboardValue(string format, object? value, Func<Image?> readImage)
+    {
+        object? clone = CloneSupportedValue(value);
+        if (clone is not null || format != DataFormats.Bitmap)
+        {
+            return clone;
+        }
+
+        // Some clipboard owners advertise Bitmap but do not expose it through
+        // IDataObject.GetData(format, autoConvert: false). Try the image API before
+        // declaring the snapshot unsafe and skipping the selected-text capture.
+        using Image? image = readImage();
+        return image is null ? null : new Bitmap(image);
+    }
+
     private static StringCollection CloneStringCollection(StringCollection source)
     {
         StringCollection clone = new();
@@ -323,3 +341,5 @@ public class ClipboardService : IClipboardService
         internal static extern uint GetClipboardSequenceNumber();
     }
 }
+
+internal sealed class ClipboardSnapshotUnavailableException(string message) : InvalidOperationException(message);

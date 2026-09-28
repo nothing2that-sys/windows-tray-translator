@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using ComTypes = System.Runtime.InteropServices.ComTypes;
 using WindowsTrayTranslator.Clipboard;
@@ -29,6 +30,40 @@ public sealed class ClipboardSnapshotTests
     public void CloneSupportedValue_UnsupportedReference_ReturnsNull()
     {
         Assert.Null(ClipboardService.CloneSupportedValue(new object()));
+    }
+
+    [Fact]
+    public void CloneClipboardValue_BitmapUnavailableThroughDataObject_UsesImageFallback()
+    {
+        using Bitmap source = new(2, 2);
+        source.SetPixel(0, 0, Color.Red);
+        bool fallbackCalled = false;
+
+        using Bitmap snapshot = Assert.IsType<Bitmap>(ClipboardService.CloneClipboardValue(
+            System.Windows.Forms.DataFormats.Bitmap,
+            null,
+            () =>
+            {
+                fallbackCalled = true;
+                return (Bitmap)source.Clone();
+            }));
+
+        Assert.True(fallbackCalled);
+        Assert.Equal(Color.Red.ToArgb(), snapshot.GetPixel(0, 0).ToArgb());
+        Assert.NotSame(source, snapshot);
+    }
+
+    [Fact]
+    public void CloneClipboardValue_UnsupportedNonBitmap_DoesNotDiscardClipboardSafety()
+    {
+        bool fallbackCalled = false;
+
+        Assert.Null(ClipboardService.CloneClipboardValue("CustomFormat", null, () =>
+        {
+            fallbackCalled = true;
+            return new Bitmap(1, 1);
+        }));
+        Assert.False(fallbackCalled);
     }
 
     [Fact]

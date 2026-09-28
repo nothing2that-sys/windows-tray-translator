@@ -361,20 +361,26 @@ public sealed class ApplicationController : IDisposable
 
             if (!result.IsSuccess)
             {
+                string errorMessage = result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.";
+                if (!result.ClipboardRestored)
+                {
+                    errorMessage += " 기존 클립보드는 복원되지 않았습니다.";
+                }
+
                 if (isReadTranslation)
                 {
-                    ShowPopup(true, TranslationPopupKind.Error, result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.");
+                    ShowPopup(true, TranslationPopupKind.Error, errorMessage);
                 }
                 else
                 {
-                    Notify(result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.", ToolTipIcon.Warning);
+                    Notify(errorMessage, ToolTipIcon.Warning);
                 }
                 return;
             }
 
             if (!result.ClipboardRestored)
             {
-                Notify("선택 문자열은 가져왔지만 기존 클립보드를 복원하지 못했습니다.", ToolTipIcon.Warning);
+                Notify("선택 문자열은 가져왔지만 기존 클립보드를 복원하지 못했습니다. 원래 내용이 덮어써졌을 수 있습니다.", ToolTipIcon.Warning);
             }
 
             targetLanguage = AutomaticTargetLanguageResolver.Resolve(targetLanguage, result.Text!);
@@ -442,13 +448,19 @@ public sealed class ApplicationController : IDisposable
 
             if (!result.IsSuccess)
             {
-                Notify(result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.", ToolTipIcon.Warning);
+                string errorMessage = result.ErrorMessage ?? "선택된 문자열을 가져오지 못했습니다.";
+                if (!result.ClipboardRestored)
+                {
+                    errorMessage += " 기존 클립보드는 복원되지 않았습니다.";
+                }
+
+                Notify(errorMessage, ToolTipIcon.Warning);
                 return;
             }
 
             if (!result.ClipboardRestored)
             {
-                Notify("선택 문자열은 가져왔지만 기존 클립보드를 복원하지 못했습니다.", ToolTipIcon.Warning);
+                Notify("선택 문자열은 가져왔지만 기존 클립보드를 복원하지 못했습니다. 원래 내용이 덮어써졌을 수 있습니다.", ToolTipIcon.Warning);
             }
 
             QuickActionSession session = new(new CapturedSelection(result.Text!, result.SourceWindow));
