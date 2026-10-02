@@ -70,6 +70,93 @@ public sealed class ClipboardMutationTests
     }
 
     [Fact]
+    public async Task Capture_UnavailableSnapshot_ContinuesCopyWithoutRestore()
+    {
+        FakeClipboard clipboard = new()
+        {
+            Text = "selected",
+            SnapshotError = new ClipboardSnapshotUnavailableException("unsupported format")
+        };
+        FakeKeyboard keyboard = new(() => clipboard.Sequence++);
+        using ClipboardMutationCoordinator coordinator = new();
+        ClipboardSelectedTextProvider provider = new(
+            clipboard, coordinator, SafeProbe(), keyboard, new FakeActiveWindow(), new TestLogger());
+
+        SelectedTextResult result = await provider.GetSelectedTextAsync(Window, 100, 1000, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("selected", result.Text);
+        Assert.False(result.ClipboardRestored);
+        Assert.Equal(0, clipboard.ClearCount);
+        Assert.Equal(1, keyboard.CopyCount);
+        Assert.Equal(0, clipboard.RestoreCount);
+    }
+
+    [Fact]
+    public async Task Capture_ClipboardAccessFailure_DoesNotOverwriteClipboard()
+    {
+        FakeClipboard clipboard = new() { SnapshotError = new InvalidOperationException("clipboard busy") };
+        FakeKeyboard keyboard = new(() => clipboard.Sequence++);
+        using ClipboardMutationCoordinator coordinator = new();
+        ClipboardSelectedTextProvider provider = new(
+            clipboard, coordinator, SafeProbe(), keyboard, new FakeActiveWindow(), new TestLogger());
+
+        SelectedTextResult result = await provider.GetSelectedTextAsync(Window, 100, 1000, CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(0, clipboard.ClearCount);
+        Assert.Equal(0, keyboard.CopyCount);
+    }
+
+    [Fact]
+    public async Task Capture_UnavailableSnapshot_ProtectedFocusKeepsOriginalClipboard()
+    {
+        FakeClipboard clipboard = new()
+        {
+            SnapshotError = new ClipboardSnapshotUnavailableException("unsupported format")
+        };
+        FakeKeyboard keyboard = new(() => clipboard.Sequence++);
+        int probes = 0;
+        SensitiveInputProbe probe = new(
+            () => Interlocked.Increment(ref probes) == 1
+                ? SensitiveProbeResult.Safe
+                : SensitiveProbeResult.Sensitive,
+            new TestLogger(),
+            100);
+        using ClipboardMutationCoordinator coordinator = new();
+        ClipboardSelectedTextProvider provider = new(
+            clipboard, coordinator, probe, keyboard, new FakeActiveWindow(), new TestLogger());
+
+        SelectedTextResult result = await provider.GetSelectedTextAsync(Window, 100, 1000, CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(SelectionMessages.SensitiveInput, result.ErrorMessage);
+        Assert.True(result.ClipboardRestored);
+        Assert.Equal(0, clipboard.ClearCount);
+        Assert.Equal(0, keyboard.CopyCount);
+    }
+
+    [Fact]
+    public async Task Capture_UnavailableSnapshot_NoCopyResponseKeepsOriginalClipboard()
+    {
+        FakeClipboard clipboard = new()
+        {
+            SnapshotError = new ClipboardSnapshotUnavailableException("unsupported format")
+        };
+        FakeKeyboard keyboard = new(() => { });
+        using ClipboardMutationCoordinator coordinator = new();
+        ClipboardSelectedTextProvider provider = new(
+            clipboard, coordinator, SafeProbe(), keyboard, new FakeActiveWindow(), new TestLogger());
+
+        SelectedTextResult result = await provider.GetSelectedTextAsync(Window, 25, 1000, CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.True(result.ClipboardRestored);
+        Assert.Equal(0, clipboard.ClearCount);
+        Assert.Equal(2, keyboard.CopyCount);
+    }
+
+    [Fact]
     public async Task Capture_Cancellation_RestoresBeforePropagating()
     {
         FakeClipboard clipboard = new();
@@ -136,14 +223,20 @@ public sealed class ClipboardMutationTests
         public uint Sequence { get; set; } = 1;
         public string Text { get; set; } = string.Empty;
         public bool ThrowOnRestore { get; set; }
+        public Exception? SnapshotError { get; set; }
+        public int ClearCount { get; private set; }
         public int RestoreCount { get; private set; }
-        public ClipboardSnapshot CaptureSnapshot() => new(new Dictionary<string, object>());
+        public ClipboardSnapshot CaptureSnapshot()
+        {
+            if (SnapshotError is not null) throw SnapshotError;
+            return new ClipboardSnapshot(new Dictionary<string, object>());
+        }
         public void Restore(ClipboardSnapshot snapshot)
         {
             RestoreCount++;
             if (ThrowOnRestore) throw new InvalidOperationException("restore failed");
         }
-        public void Clear() { }
+        public void Clear() => ClearCount++;
         public bool ContainsText() => !string.IsNullOrEmpty(Text);
         public string GetText() => Text;
         public uint GetSequenceNumber() => Sequence;
@@ -152,9 +245,14 @@ public sealed class ClipboardMutationTests
 
     private sealed class FakeKeyboard(Action onCopy) : IKeyboardInputService
     {
+        public int CopyCount { get; private set; }
         public int PasteCount { get; private set; }
         public Task<bool> WaitForModifiersReleasedAsync(int timeoutMs, CancellationToken cancellationToken) => Task.FromResult(true);
-        public void SendCopy() => onCopy();
+        public void SendCopy()
+        {
+            CopyCount++;
+            onCopy();
+        }
         public void SendPaste() => PasteCount++;
     }
 

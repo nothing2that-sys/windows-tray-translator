@@ -57,6 +57,7 @@ public sealed class ClipboardSelectedTextProvider : ISelectedTextProvider
     {
         ClipboardSnapshot? snapshot = null;
         bool restoreOk = true;
+        bool snapshotUnavailable = false;
         bool stopAttempts = false;
         SelectedTextResult result = SelectedTextResult.Failure("선택된 문자열을 가져오지 못했습니다.", sourceWindow);
         try
@@ -80,8 +81,25 @@ public sealed class ClipboardSelectedTextProvider : ISelectedTextProvider
             }
             else
             {
-                snapshot = clipboard.CaptureSnapshot();
-                clipboard.Clear();
+                try
+                {
+                    snapshot = clipboard.CaptureSnapshot();
+                }
+                catch (ClipboardSnapshotUnavailableException)
+                {
+                    // The user chose to continue like a direct Ctrl+C when an existing
+                    // clipboard format cannot be preserved. Other clipboard access errors
+                    // still abort before Clear or SendCopy.
+                    snapshotUnavailable = true;
+                    logger.Warning($"기존 클립보드를 백업할 수 없어 복원 없이 캡처합니다. Process={sourceWindow.ProcessName}");
+                }
+
+                if (!snapshotUnavailable)
+                {
+                    clipboard.Clear();
+                }
+                // Without a snapshot, behave like a direct Ctrl+C: an app that does not
+                // copy anything leaves the user's existing clipboard untouched.
                 for (int attempt = 1; attempt <= 2 && !result.IsSuccess && !stopAttempts; attempt++)
                 {
                     if (!activeWindow.IsStillActive(sourceWindow))
@@ -107,24 +125,32 @@ public sealed class ClipboardSelectedTextProvider : ISelectedTextProvider
                     while (elapsed < timeoutMs)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        if (clipboard.GetSequenceNumber() != baselineSequence && clipboard.ContainsText())
+                        if (clipboard.GetSequenceNumber() != baselineSequence)
                         {
-                            string text = clipboard.GetText();
-                            if (string.IsNullOrWhiteSpace(text))
+                            if (snapshotUnavailable)
                             {
-                                stopAttempts = true;
-                                break;
+                                restoreOk = false;
                             }
 
-                            if (text.Length > maxCharacters)
+                            if (clipboard.ContainsText())
                             {
-                                result = SelectedTextResult.Failure("번역 가능한 최대 문자 수를 초과했습니다.", sourceWindow, canFallback: false);
+                                string text = clipboard.GetText();
+                                if (string.IsNullOrWhiteSpace(text))
+                                {
+                                    stopAttempts = true;
+                                    break;
+                                }
+
+                                if (text.Length > maxCharacters)
+                                {
+                                    result = SelectedTextResult.Failure("번역 가능한 최대 문자 수를 초과했습니다.", sourceWindow, canFallback: false);
+                                    break;
+                                }
+
+                                logger.Information($"선택 문자열을 캡처했습니다. Process={sourceWindow.ProcessName}, Characters={text.Length}, Attempt={attempt}");
+                                result = SelectedTextResult.Success(text, sourceWindow);
                                 break;
                             }
-
-                            logger.Information($"선택 문자열을 캡처했습니다. Process={sourceWindow.ProcessName}, Characters={text.Length}, Attempt={attempt}");
-                            result = SelectedTextResult.Success(text, sourceWindow);
-                            break;
                         }
 
                         await Task.Delay(25, cancellationToken);

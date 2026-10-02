@@ -37,10 +37,14 @@ public sealed class CompositeSelectedTextProvider : ISelectedTextProvider
         }
 
         logger.Information($"기본 선택 문자열 획득 실패 후 보조 방식을 시도합니다. Process={sourceWindow.ProcessName}");
-        return await fallback.GetSelectedTextAsync(
+        SelectedTextResult fallbackResult = await fallback.GetSelectedTextAsync(
             sourceWindow,
             timeoutMs,
             maxCharacters,
             cancellationToken);
+        return fallbackResult with
+        {
+            ClipboardRestored = primaryResult.ClipboardRestored && fallbackResult.ClipboardRestored
+        };
     }
 }

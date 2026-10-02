@@ -51,14 +51,14 @@
 
 ### 권장: Installer
 
-1. [WindowsTrayTranslator-Setup-1.3.1-x64.exe](https://github.com/nothing2that-sys/windows-tray-translator/releases/download/v1.3.1/WindowsTrayTranslator-Setup-1.3.1-x64.exe)를 다운로드합니다.
+1. [WindowsTrayTranslator-Setup-1.3.2-x64.exe](https://github.com/nothing2that-sys/windows-tray-translator/releases/download/v1.3.2/WindowsTrayTranslator-Setup-1.3.2-x64.exe)를 다운로드합니다.
 2. 설치 프로그램을 실행합니다.
 3. 트레이 아이콘을 더블클릭하고 `API` 탭에서 Gemini API Key를 저장합니다.
 4. 메모장 등에서 문장을 선택한 뒤 `Alt+R`로 확인합니다.
 
-설치 없이 사용하려면 [Portable ZIP](https://github.com/nothing2that-sys/windows-tray-translator/releases/download/v1.3.1/WindowsTrayTranslator-Portable-1.3.1-x64.zip)을 내려받아 압축을 풀고 `WindowsTrayTranslator.exe`를 실행하세요.
+설치 없이 사용하려면 [Portable ZIP](https://github.com/nothing2that-sys/windows-tray-translator/releases/download/v1.3.2/WindowsTrayTranslator-Portable-1.3.2-x64.zip)을 내려받아 압축을 풀고 `WindowsTrayTranslator.exe`를 실행하세요.
 
-> 현재 설치 파일은 코드 서명되지 않았습니다. Windows SmartScreen 경고가 나타날 수 있으며, 다운로드한 파일은 같은 Release의 [`SHA256SUMS.txt`](https://github.com/nothing2that-sys/windows-tray-translator/releases/download/v1.3.1/SHA256SUMS.txt)로 검증할 수 있습니다.
+> 현재 설치 파일은 코드 서명되지 않았습니다. Windows SmartScreen 경고가 나타날 수 있으며, 다운로드한 파일은 같은 Release의 [`SHA256SUMS.txt`](https://github.com/nothing2that-sys/windows-tray-translator/releases/download/v1.3.2/SHA256SUMS.txt)로 검증할 수 있습니다.
 
 ### 요구 환경
 
@@ -126,7 +126,7 @@
 ## 알려진 제한사항
 
 - 자체 렌더링된 일부 웹 입력 요소에서는 같은 창 안의 포커스 변경을 완벽히 식별하지 못할 수 있습니다.
-- 일부 앱 전용 클립보드 형식은 안전하게 백업할 수 없어 캡처를 취소할 수 있습니다.
+- 일부 앱 전용 클립보드 형식을 백업할 수 없으면 기존 클립보드 복원 없이 선택 문자열을 캡처합니다. 이때 원래 내용이 덮어써질 수 있으며 복원하지 못한 경우 경고를 표시합니다.
 - 현재 앱보다 높은 권한으로 실행된 프로그램에는 Windows가 `SendInput`을 차단할 수 있습니다.
 - 설치 프로그램은 아직 코드 서명되지 않았습니다.
 
