@@ -24,6 +24,16 @@
 
 ![번역 설정 화면](doc/images/settings-translation.png)
 
+## AI 활용 사례와 실제 시연
+
+해외 동료와의 메신저 업무에 활용한 번역 도구의 개발 과정과 실제 동작을 소개합니다.
+
+- [활용 사례 설명서 PDF (2쪽)](doc/ai-use-case/WindowsTrayTranslator-AI-Use-Case.pdf)
+- [대화 번역 · 긴 문장 번역 후 요약 시연 영상 (약 1분 46초)](doc/ai-use-case/WindowsTrayTranslator-AskUp-Demo.mp4)
+- [PDF·영상 다운로드 모음](https://github.com/nothing2that-sys/windows-tray-translator/releases/tag/case-study-2026-10-20)
+
+영상은 AskUp AI를 대화 상대로 사용한 재현 시연이며 실제 해외 동료의 대화가 아닙니다. 시간 절감률과 번역 정확도는 측정하지 않았습니다.
+
 ## 3단계로 사용하기
 
 1. 메모장, 브라우저, IDE 등에서 번역할 문장을 선택합니다.
